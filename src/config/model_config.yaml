@@ -1,25 +1,2 @@
 models:
-  resnet-18:
-    type: ResNet
-    pretrained: True
-    num_classes: 1000
-  resnet-50:
-    type: ResNet
-    pretrained: True
-    num_classes: 1000
-  vgg-19:
-    type: VGG
-    pretrained: True
-    num_classes: 1000
-
-ensembles:
-  resnet-18-ensemble:
-    models:
-      - resnet-18
-    vote: majority
-    evaluator_count: 5
-  resnet-50-vgg-ensemble:
-    models:
-      - resnet-50
-    vote: majority
-    evaluator_count: 5
+  
