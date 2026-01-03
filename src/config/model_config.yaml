@@ -1,2 +1,4 @@
 models:
-  
+  vit-with-tokenizer:
+    image-model: "google/vit-base-patch16-224"
+    tokenizer-model: "bert-base-uncased"
