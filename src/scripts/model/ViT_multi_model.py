@@ -3,7 +3,14 @@
 from sklearn.metrics import precision_score, f1_score, recall_score
 import torch
 import torch.nn as nn
-from transformers import AutoModel, AutoModelForImageClassification, AutoTokenizer
+from transformers import AutoModel, AutoModel, AutoTokenizer
+
+def configure_optimizer(params, lr: float = 1e-3, optimizer: str = 'Adam', momentum: float = 0.5):
+    if optimizer == 'Adam':
+        return torch.optim.Adam(params, lr=lr)
+    if optimizer == 'SGD':
+        return torch.optim.SGD(params, lr=lr, momentum=momentum)
+    raise KeyError(f'Optimizer \'{optimizer}\' is not supported.')
 
 class FusionModule(nn.Module):
     def __init__(self, in_size, num_classes):
@@ -20,18 +27,25 @@ class FusionModule(nn.Module):
         return self.fc(fused)
     
 class ViTMultiModalModel(nn.Module):
-    def __init__(self, config, num_classes: int, lr: float = 0.001):
-        super().__init__(self)
+    def __init__(self, config, num_classes: int, lr: float = 1e-3, optimizer: str = 'Adam'):
+        super().__init__()
+        self.num_classes = num_classes
+        
         self.vision_model_name = config['image-model']
         self.text_model_name = config['text-model']
         self.tokenizer_name = config['text-model']
-        self.vision_model = AutoModelForImageClassification.from_pretrained(self.vision_model_name)
-        self.tokenizer = AutoTokenizer.from_pretrained(self.tokenizer_name)
-        self.text_model = AutoModel.from_pretrained(self.text_model_name)
-        self.fusion = FusionModule(self.vision_model.hidden_size + self.text_model.hidden_size, num_classes)
+        
+        self.vision_model   = AutoModel.from_pretrained(self.vision_model_name)
+        self.tokenizer      = AutoTokenizer.from_pretrained(self.tokenizer_name)
+        self.text_model     = AutoModel.from_pretrained(self.text_model_name)
+        self.fusion         = FusionModule(vision_dim + text_dim, num_classes)
+        
+        vision_dim = self.vision_model.config.hidden_size
+        text_dim = self.text_model.config.hidden_size
+        
         self.loss_fn = nn.CrossEntropyLoss()
         self.lr = lr
-        self.num_classes = num_classes
+        self.optimizer = configure_optimizer(self.parameters(), lr, optimizer)
         
     def forward(self, x):
         pixel_values = x['pixel_values']
@@ -45,36 +59,9 @@ class ViTMultiModalModel(nn.Module):
         
         logits = self.fusion(img_embeds, txt_embeds)
         return logits
-        
-    def training_step(self, train_batch, batch_idx):
-        x, y = train_batch, train_batch["labels"]
-        logits = self(x)
-        loss = self.loss_fn(logits, y)
-        preds = logits.argmax(dim=1)
-        acc = (preds == y).float().mean()
-        f1 = f1_score(preds, y, task="multiclass", num_classes=self.num_classes)
-        prec_score = precision_score(preds, y, task="multiclass", num_classes=self.num_classes)
-        rec_score = recall_score(preds, y, task="multiclass", num_classes=self.num_classes)
-        print(f'Training - Accuracy: {acc}, F1: {f1}, Precision: {prec_score}, Recall: {rec_score}')
-        return loss
-
-    def validation_step(self, val_batch, batch_idx):
-        x, y = val_batch, val_batch["labels"]
-        logits = self(x)
-        loss = self.loss_fn(logits, y)
-        preds = logits.argmax(dim=1)
-        acc = (preds == y).float().mean()
-        f1 = f1_score(preds, y, task="multiclass", num_classes=self.num_classes)
-        prec_score = precision_score(preds, y, task="multiclass", num_classes=self.num_classes)
-        rec_score = recall_score(preds, y, task="multiclass", num_classes=self.num_classes)
-        print(f'Validation - Accuracy: {acc}, F1: {f1}, Precision: {prec_score}, Recall: {rec_score}')
-        return loss
-
-    def predict_step(self, test_batch, batch_idx):
-        x, y = test_batch, test_batch["labels"]
-        logits = self(x)
-        preds = torch.argmax(logits, dim=1)
-        return {"preds": preds, "targets": y}
-
-    def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+    
+    # important
+    def compute_loss(self, batch):
+        logits = self(batch)
+        labels = batch["labels"]
+        return self.loss_fn(logits, labels)
