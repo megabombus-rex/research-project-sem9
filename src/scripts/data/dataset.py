@@ -6,6 +6,8 @@ from torchvision import transforms
 from typing import List, Tuple
 from collections import Counter
 
+from transformers import BertTokenizer
+
 from download_dataset import download_medtrinity_dataset
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -84,8 +86,8 @@ def get_dataloaders(batch_size: int = 32, num_workers: int = 4):
     
     train_data = train_test_split['train']
     
-    all_captions = train_data["caption"]
-    tokenizer = BasicTokenizer(all_captions)
+    # all_captions = train_data["caption"]
+    tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
     print('tokenizer.vocab_size: ', tokenizer.vocab_size)
 
     train_set = MedTrinityDataset(train_data, tokenizer=tokenizer)
