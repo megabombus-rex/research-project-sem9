@@ -8,13 +8,13 @@ from collections import Counter
 
 from transformers import BertTokenizer
 
-from download_dataset import download_medtrinity_dataset
+from download_dataset import download_chexpert_dataset
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
-data_dir = os.path.abspath(os.path.join(script_dir, "../../../data/MedTrinity-25M"))
+data_dir = os.path.abspath(os.path.join(script_dir, "../../../data/chexpert"))
 
 if not os.path.exists(data_dir):
-    ds = download_medtrinity_dataset(data_dir)
+    ds = download_chexpert_dataset(data_dir)
 else:
     ds = load_from_disk(data_dir)
 
