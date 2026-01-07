@@ -1,7 +1,7 @@
 import torch
 from tqdm import tqdm
 
-from src.scripts.model.ViT_multi_model import ViTMultiModalModel
+from src.scripts.model.ViT_multi_model import ViTTextMultiModalModel, ViTTabMultiModalMutilabelModel
 from src.scripts.util.config_reader import load_models_config
 from src.scripts.data.dataset import get_dataloaders
 
@@ -67,13 +67,20 @@ class Trainer():
         print(f"Test loss: {total_loss / len(loader):.4f}")
         
 if __name__ == '__main__':
+    MAX_EPOCHS = 5
+    BATCH_SIZE = 32
+    DEVICE = 'cpu'
+    
     config = load_models_config()
+    
+    torch.manual_seed(42)
     
     train_set, val_set, test_set, labels = get_dataloaders()
     num_classes = len(labels)
     
-    model = ViTMultiModalModel(config['models']['vit-with-tokenizer'], num_classes=num_classes)
+    # model = ViTTextMultiModalModel(config['models']['vit-with-tokenizer'], num_classes=num_classes)
+    model = ViTTabMultiModalMutilabelModel(config['models']['vit-model-tabular'], num_classes=num_classes)
     
-    trainer = Trainer(5, 32, 'cpu')
+    trainer = Trainer(MAX_EPOCHS, BATCH_SIZE, DEVICE)
     trainer.fit(model, train_set, test_set, val_set)
     
