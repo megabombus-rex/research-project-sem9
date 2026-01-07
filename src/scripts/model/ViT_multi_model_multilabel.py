@@ -2,6 +2,7 @@ import pytorch_lightning as L
 import torch
 import torch.nn as nn
 from transformers import AutoModel, AutoModel, AutoTokenizer
+from torchmetrics.classification import MultilabelAUROC, MultilabelAveragePrecision, MultilabelF1Score
 
 from src.scripts.model.fusion_module import FusionModule
 
@@ -36,6 +37,38 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
             p.requires_grad = False
 
         self.loss_fn = nn.BCEWithLogitsLoss()
+
+        self.val_auroc = MultilabelAUROC(
+            num_labels=self.num_classes,
+            average="macro"
+        )
+
+        self.val_ap = MultilabelAveragePrecision(
+            num_labels=self.num_classes,
+            average="macro"
+        )
+
+        self.val_f1 = MultilabelF1Score(
+            num_labels=self.num_classes,
+            average="macro",
+            threshold=0.5
+        )
+
+        self.test_auroc = MultilabelAUROC(
+            num_labels=self.num_classes,
+            average="macro"
+        )
+
+        self.test_ap = MultilabelAveragePrecision(
+            num_labels=self.num_classes,
+            average="macro"
+        )
+
+        self.test_f1 = MultilabelF1Score(
+            num_labels=self.num_classes,
+            average="macro",
+            threshold=0.5
+        )
 
     def forward(self, x):
         pixel_values = x["pixel_values"]
@@ -85,9 +118,24 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
+        probs = torch.sigmoid(logits)
+
+        self.val_auroc.update(probs, labels.int())
+        self.val_ap.update(probs, labels.int())
+        self.val_f1.update(probs, labels.int())
+
         self.log("val_loss", loss, prog_bar=True, batch_size=images.size(0))
         return loss
+    
+    def on_validation_epoch_end(self):
+        self.log("val_auroc", self.val_auroc.compute(), prog_bar=True)
+        self.log("val_map", self.val_ap.compute(), prog_bar=True)
+        self.log("val_f1", self.val_f1.compute(), prog_bar=True)
 
+        self.val_auroc.reset()
+        self.val_ap.reset()
+        self.val_f1.reset()
+        
     def test_step(self, batch, batch_idx):
         images, metadata, labels = batch
         transformed_text = self.tokenizer(
@@ -102,10 +150,22 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
             "input_ids": torch.tensor(transformed_text["input_ids"]).to(self.device),
             "attention_mask": torch.tensor(transformed_text["attention_mask"]).to(self.device)
         }
+        
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
+        probs = torch.sigmoid(logits)
+
+        self.test_auroc.update(probs, labels.int())
+        self.test_ap.update(probs, labels.int())
+        self.test_f1.update(probs, labels.int())
         self.log("test_loss", loss, batch_size=images.size(0))
         return loss
+    
+    def on_test_epoch_end(self):
+        self.log("test_auroc", self.test_auroc.compute())
+        self.log("test_map", self.test_ap.compute())
+        self.log("test_f1", self.test_f1.compute())    
+
 
     def configure_optimizers(self):
         if self.optimizer_name.lower() == "sgd":
@@ -143,8 +203,43 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
 
         self.fusion = FusionModule(vision_dim + tab_dim, num_classes)
 
+        for p in self.vision_model.parameters():
+            p.requires_grad = False
+            
         # due to multilabel logic - this should be the loss
         self.loss_fn = nn.BCEWithLogitsLoss()
+
+        self.val_auroc = MultilabelAUROC(
+            num_labels=self.num_classes,
+            average="macro"
+        )
+
+        self.val_ap = MultilabelAveragePrecision(
+            num_labels=self.num_classes,
+            average="macro"
+        )
+
+        self.val_f1 = MultilabelF1Score(
+            num_labels=self.num_classes,
+            average="macro",
+            threshold=0.5
+        )
+
+        self.test_auroc = MultilabelAUROC(
+            num_labels=self.num_classes,
+            average="macro"
+        )
+
+        self.test_ap = MultilabelAveragePrecision(
+            num_labels=self.num_classes,
+            average="macro"
+        )
+
+        self.test_f1 = MultilabelF1Score(
+            num_labels=self.num_classes,
+            average="macro",
+            threshold=0.5
+        )
 
     def forward(self, x):
         pixel_values = x["pixel_values"]
@@ -178,7 +273,23 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
+        probs = torch.sigmoid(logits)
+
+        self.val_auroc.update(probs, labels.int())
+        self.val_ap.update(probs, labels.int())
+        self.val_f1.update(probs, labels.int())
+
         self.log("val_loss", loss, prog_bar=True, batch_size=images.size(0))
+        return loss
+    
+    def on_validation_epoch_end(self):
+        self.log("val_auroc", self.val_auroc.compute(), prog_bar=True)
+        self.log("val_map", self.val_ap.compute(), prog_bar=True)
+        self.log("val_f1", self.val_f1.compute(), prog_bar=True)
+
+        self.val_auroc.reset()
+        self.val_ap.reset()
+        self.val_f1.reset()
 
     def test_step(self, batch, batch_idx):
         images, metadata, labels = batch
@@ -188,7 +299,18 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
+        probs = torch.sigmoid(logits)
+
+        self.test_auroc.update(probs, labels.int())
+        self.test_ap.update(probs, labels.int())
+        self.test_f1.update(probs, labels.int())
         self.log("test_loss", loss, batch_size=images.size(0))
+        return loss
+    
+    def on_test_epoch_end(self):
+        self.log("test_auroc", self.test_auroc.compute())
+        self.log("test_map", self.test_ap.compute())
+        self.log("test_f1", self.test_f1.compute())    
 
     def configure_optimizers(self):
         if self.optimizer_name.lower() == "sgd":
@@ -257,8 +379,43 @@ class ViTMonoMultilabelModel(L.LightningModule):
             nn.Linear(in_size // 2, num_classes),
         )
 
+        for p in self.vision_model.parameters():
+            p.requires_grad = False
+
         # due to multilabel logic - this should be the loss
         self.loss_fn = nn.BCEWithLogitsLoss()
+
+        self.val_auroc = MultilabelAUROC(
+            num_labels=self.num_classes,
+            average="macro"
+        )
+
+        self.val_ap = MultilabelAveragePrecision(
+            num_labels=self.num_classes,
+            average="macro"
+        )
+
+        self.val_f1 = MultilabelF1Score(
+            num_labels=self.num_classes,
+            average="macro",
+            threshold=0.5
+        )
+
+        self.test_auroc = MultilabelAUROC(
+            num_labels=self.num_classes,
+            average="macro"
+        )
+
+        self.test_ap = MultilabelAveragePrecision(
+            num_labels=self.num_classes,
+            average="macro"
+        )
+
+        self.test_f1 = MultilabelF1Score(
+            num_labels=self.num_classes,
+            average="macro",
+            threshold=0.5
+        )
 
     def forward(self, x):
         outputs_v = self.vision_model(x["pixel_values"])
@@ -283,7 +440,23 @@ class ViTMonoMultilabelModel(L.LightningModule):
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
+        probs = torch.sigmoid(logits)
+
+        self.val_auroc.update(probs, labels.int())
+        self.val_ap.update(probs, labels.int())
+        self.val_f1.update(probs, labels.int())
+
         self.log("val_loss", loss, prog_bar=True, batch_size=images.size(0))
+        return loss
+    
+    def on_validation_epoch_end(self):
+        self.log("val_auroc", self.val_auroc.compute(), prog_bar=True)
+        self.log("val_map", self.val_ap.compute(), prog_bar=True)
+        self.log("val_f1", self.val_f1.compute(), prog_bar=True)
+
+        self.val_auroc.reset()
+        self.val_ap.reset()
+        self.val_f1.reset()
 
     def test_step(self, batch, batch_idx):
         images, _, labels = batch
@@ -292,7 +465,18 @@ class ViTMonoMultilabelModel(L.LightningModule):
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
+        probs = torch.sigmoid(logits)
+
+        self.test_auroc.update(probs, labels.int())
+        self.test_ap.update(probs, labels.int())
+        self.test_f1.update(probs, labels.int())
         self.log("test_loss", loss, batch_size=images.size(0))
+        return loss
+    
+    def on_test_epoch_end(self):
+        self.log("test_auroc", self.test_auroc.compute())
+        self.log("test_map", self.test_ap.compute())
+        self.log("test_f1", self.test_f1.compute())    
 
     def configure_optimizers(self):
         if self.optimizer_name.lower() == "sgd":
