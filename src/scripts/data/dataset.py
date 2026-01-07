@@ -79,13 +79,16 @@ class CheXpertDataset(Dataset):
     
     def _prepare_encoders(self):
         self.sex_encoder = LabelEncoder()
-        self.sex_encoder.fit(self.df['Sex'].fillna('Unknown'))
+        self.df['Sex'] = self.df['Sex'].fillna('Unknown')
+        self.sex_encoder.fit(self.df['Sex'])
         
         self.view_encoder = LabelEncoder()
-        self.view_encoder.fit(self.df['Frontal/Lateral'].fillna('Unknown'))
+        self.df['Frontal/Lateral'] = self.df['Frontal/Lateral'].fillna('Unknown')
+        self.view_encoder.fit(self.df['Frontal/Lateral'])
         
         self.position_encoder = LabelEncoder()
-        self.position_encoder.fit(self.df['AP/PA'].fillna('Unknown'))
+        self.df['AP/PA'] = self.df['AP/PA'].fillna('Unknown')
+        self.position_encoder.fit(self.df['AP/PA'])
         
         self.age_scaler = MinMaxScaler()
         ages = self.df['Age'].fillna(self.df['Age'].median()).values.reshape(-1, 1)
@@ -145,7 +148,8 @@ def get_dataloaders(
     mode: Literal["tabular", "text"] = "tabular",
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
-    test_ratio: float = 0.15
+    test_ratio: float = 0.15,
+    seed: int = 42,
 ):
     assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, "Ratios must sum to 1.0"
     
@@ -159,7 +163,7 @@ def get_dataloaders(
     train_set, val_set, test_set = torch.utils.data.random_split(
         full_dataset,
         [train_size, val_size, test_size],
-        generator=torch.Generator().manual_seed(42)
+        generator=torch.Generator().manual_seed(seed)
     )
     
     loader_args = {
