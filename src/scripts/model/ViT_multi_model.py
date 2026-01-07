@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 from transformers import AutoModel, AutoModel, AutoTokenizer
 
+from src.scripts.model.fusion_module import FusionModule
+
 
 def configure_optimizer(
     params, lr: float = 1e-3, optimizer: str = "Adam", momentum: float = 0.5
@@ -14,22 +16,6 @@ def configure_optimizer(
     if optimizer == "SGD":
         return torch.optim.SGD(params, lr=lr, momentum=momentum)
     raise KeyError(f"Optimizer '{optimizer}' is not supported.")
-
-
-class FusionModule(nn.Module):
-    def __init__(self, in_size, num_classes):
-        super().__init__()
-        self.fc = nn.Sequential(
-            nn.Linear(in_size, in_size // 2),
-            nn.ReLU(),
-            nn.Dropout(0.1),
-            nn.Linear(in_size // 2, num_classes),
-        )
-
-    def forward(self, img_embeds, txt_embeds):
-        fused = torch.cat([img_embeds, txt_embeds], dim=-1)
-        return self.fc(fused)
-
 
 class ViTTextMultiModalModel(nn.Module):
     def __init__(
