@@ -69,7 +69,7 @@ class Trainer():
 if __name__ == '__main__':
     MAX_EPOCHS = 5
     BATCH_SIZE = 32
-    DEVICE = 'cpu'
+    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     config = load_models_config()
     
