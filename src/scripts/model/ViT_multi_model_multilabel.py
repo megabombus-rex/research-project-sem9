@@ -29,6 +29,11 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         vision_dim, text_dim    = self.vision_model.config.hidden_size, self.text_model.config.hidden_size
         self.fusion             = FusionModule(vision_dim + text_dim, num_classes)
 
+        for p in self.vision_model.parameters():
+            p.requires_grad = False
+
+        for p in self.text_model.parameters():
+            p.requires_grad = False
 
         self.loss_fn = nn.BCEWithLogitsLoss()
 
@@ -47,41 +52,59 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
     
     def training_step(self, batch, batch_idx):
         images, metadata, labels = batch
-        transformed_text = self.tokenizer(metadata)
+        transformed_text = self.tokenizer(
+            metadata,
+            padding=True,
+            truncation=True,
+            return_tensors="pt"
+            )
+        
         x = {
             "pixel_values": images,
-            "input_ids": torch.tensor(transformed_text["input_ids"]),
-            "attention_mask": torch.tensor(transformed_text["attention_mask"])
+            "input_ids": torch.tensor(transformed_text["input_ids"]).to(self.device),
+            "attention_mask": torch.tensor(transformed_text["attention_mask"]).to(self.device)
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
-        self.log("train_loss", loss, prog_bar=True)
+        self.log("train_loss", loss, prog_bar=True, batch_size=images.size(0))
         return loss
 
     def validation_step(self, batch, batch_idx):
         images, metadata, labels = batch
-        transformed_text = self.tokenizer(metadata)
+        transformed_text = self.tokenizer(
+            metadata,
+            padding=True,
+            truncation=True,
+            return_tensors="pt"
+            )
+        
         x = {
             "pixel_values": images,
-            "input_ids": torch.tensor(transformed_text["input_ids"]),
-            "attention_mask": torch.tensor(transformed_text["attention_mask"])
+            "input_ids": torch.tensor(transformed_text["input_ids"]).to(self.device),
+            "attention_mask": torch.tensor(transformed_text["attention_mask"]).to(self.device)
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
-        self.log("val_loss", loss, prog_bar=True)
+        self.log("val_loss", loss, prog_bar=True, batch_size=images.size(0))
         return loss
 
     def test_step(self, batch, batch_idx):
         images, metadata, labels = batch
-        transformed_text = self.tokenizer(metadata)
+        transformed_text = self.tokenizer(
+            metadata,
+            padding=True,
+            truncation=True,
+            return_tensors="pt"
+            )
+        
         x = {
             "pixel_values": images,
-            "input_ids": torch.tensor(transformed_text["input_ids"]),
-            "attention_mask": torch.tensor(transformed_text["attention_mask"])
+            "input_ids": torch.tensor(transformed_text["input_ids"]).to(self.device),
+            "attention_mask": torch.tensor(transformed_text["attention_mask"]).to(self.device)
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
-        self.log("test_loss", loss)
+        self.log("test_loss", loss, batch_size=images.size(0))
         return loss
 
     def configure_optimizers(self):
@@ -144,7 +167,7 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
-        self.log("train_loss", loss, prog_bar=True)
+        self.log("train_loss", loss, prog_bar=True, batch_size=images.size(0))
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -155,7 +178,7 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
-        self.log("val_loss", loss, prog_bar=True)
+        self.log("val_loss", loss, prog_bar=True, batch_size=images.size(0))
 
     def test_step(self, batch, batch_idx):
         images, metadata, labels = batch
@@ -165,7 +188,7 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
-        self.log("test_loss", loss)
+        self.log("test_loss", loss, batch_size=images.size(0))
 
     def configure_optimizers(self):
         if self.optimizer_name.lower() == "sgd":
@@ -250,7 +273,7 @@ class ViTMonoMultilabelModel(L.LightningModule):
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
-        self.log("train_loss", loss, prog_bar=True)
+        self.log("train_loss", loss, prog_bar=True, batch_size=images.size(0))
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -260,7 +283,7 @@ class ViTMonoMultilabelModel(L.LightningModule):
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
-        self.log("val_loss", loss, prog_bar=True)
+        self.log("val_loss", loss, prog_bar=True, batch_size=images.size(0))
 
     def test_step(self, batch, batch_idx):
         images, _, labels = batch
@@ -269,7 +292,7 @@ class ViTMonoMultilabelModel(L.LightningModule):
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
-        self.log("test_loss", loss)
+        self.log("test_loss", loss, batch_size=images.size(0))
 
     def configure_optimizers(self):
         if self.optimizer_name.lower() == "sgd":
