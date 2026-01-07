@@ -1,7 +1,7 @@
 models:
   vit-with-tokenizer:
     image-model: "google/vit-base-patch16-224"
-    tokenizer-model: "bert-base-uncased"
+    text-model: "bert-base-uncased"
   vit-model-tabular:
     image-model: "google/vit-base-patch16-224"
     tab-model:
