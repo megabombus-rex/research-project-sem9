@@ -75,8 +75,9 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         input_ids = x["input_ids"]
         attention_mask = x["attention_mask"]
 
-        outputs_v = self.vision_model(pixel_values)
-        outputs_t = self.text_model(input_ids, attention_mask)
+        with torch.no_grad():
+            outputs_v = self.vision_model(pixel_values)
+            outputs_t = self.text_model(input_ids, attention_mask)
         img_embeds = outputs_v.last_hidden_state[:, 0]
         txt_embeds = outputs_t.last_hidden_state[:, 0]
 
@@ -84,18 +85,11 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         return logits
     
     def training_step(self, batch, batch_idx):
-        images, metadata, labels = batch
-        transformed_text = self.tokenizer(
-            metadata,
-            padding=True,
-            truncation=True,
-            return_tensors="pt"
-            )
-        
+        images, metadata, labels = batch        
         x = {
             "pixel_values": images,
-            "input_ids": torch.tensor(transformed_text["input_ids"]).to(self.device),
-            "attention_mask": torch.tensor(transformed_text["attention_mask"]).to(self.device)
+            "input_ids": metadata["input_ids"].to(self.device),
+            "attention_mask": metadata["attention_mask"].to(self.device)
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
@@ -104,17 +98,10 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         images, metadata, labels = batch
-        transformed_text = self.tokenizer(
-            metadata,
-            padding=True,
-            truncation=True,
-            return_tensors="pt"
-            )
-        
         x = {
             "pixel_values": images,
-            "input_ids": torch.tensor(transformed_text["input_ids"]).to(self.device),
-            "attention_mask": torch.tensor(transformed_text["attention_mask"]).to(self.device)
+            "input_ids": metadata["input_ids"],
+            "attention_mask": metadata["attention_mask"]
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
@@ -137,20 +124,12 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         self.val_f1.reset()
         
     def test_step(self, batch, batch_idx):
-        images, metadata, labels = batch
-        transformed_text = self.tokenizer(
-            metadata,
-            padding=True,
-            truncation=True,
-            return_tensors="pt"
-            )
-        
+        images, metadata, labels = batch        
         x = {
             "pixel_values": images,
-            "input_ids": torch.tensor(transformed_text["input_ids"]).to(self.device),
-            "attention_mask": torch.tensor(transformed_text["attention_mask"]).to(self.device)
-        }
-        
+            "input_ids": metadata["input_ids"].to(self.device),
+            "attention_mask": metadata["attention_mask"].to(self.device)
+        }        
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
         probs = torch.sigmoid(logits)
@@ -169,11 +148,20 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
 
     def configure_optimizers(self):
         if self.optimizer_name.lower() == "sgd":
-            optimizer = torch.optim.SGD(self.parameters(), lr=self.lr)
+            optimizer = torch.optim.SGD(
+                filter(lambda p: p.requires_grad, self.parameters()), 
+                lr=self.lr
+                )
         if self.optimizer_name.lower() == "adamw":
-            optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
+            optimizer = torch.optim.AdamW(
+                filter(lambda p: p.requires_grad, self.parameters()), 
+                lr=self.lr
+                )
         else:
-            optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+            optimizer = torch.optim.Adam(
+                filter(lambda p: p.requires_grad, self.parameters()), 
+                lr=self.lr
+                )
 
         return optimizer
     
@@ -246,10 +234,11 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
         tabular_values = x["tabular_values"]
 
 
-        outputs_v = self.vision_model(pixel_values)
-        img_embeds = outputs_v.last_hidden_state[:, 0]
-
+        with torch.no_grad():
+            outputs_v = self.vision_model(pixel_values)
+        
         tab_embeds = self.tabular_model(tabular_values)
+        img_embeds = outputs_v.last_hidden_state[:, 0]
 
         logits = self.fusion(img_embeds, tab_embeds)
         return logits
@@ -418,7 +407,8 @@ class ViTMonoMultilabelModel(L.LightningModule):
         )
 
     def forward(self, x):
-        outputs_v = self.vision_model(x["pixel_values"])
+        with torch.no_grad():
+            outputs_v = self.vision_model(x["pixel_values"])
         logits = self.classifier(outputs_v.last_hidden_state[:, 0])
         return logits
     

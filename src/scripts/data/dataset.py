@@ -8,21 +8,15 @@ from torchvision import transforms
 from typing import Tuple, Literal
 from pathlib import Path
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
+from transformers import AutoTokenizer
 
-from download_dataset import download_chexpert_dataset
+from src.scripts.data.download_dataset import download_chexpert_dataset
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 data_dir = os.path.abspath(os.path.join(script_dir, "../../../data/chexpert/CheXpert-v1.0-small"))
 
 if not os.path.exists(data_dir):
     download_chexpert_dataset(os.path.dirname(data_dir))
-
-
-def text_collate_fn(batch):
-    images = torch.stack([item[0] for item in batch])
-    texts = [item[1] for item in batch]
-    labels = torch.stack([item[2] for item in batch])
-    return images, texts, labels
 
 
 class CheXpertDataset(Dataset):
@@ -38,9 +32,10 @@ class CheXpertDataset(Dataset):
     def __init__(
         self,
         data_dir: str,
-        mode: Literal["tabular", "text"] = "tabular",
+        tokenizer: str = None,
+        mode: Literal["tabular", "text", "mono"] = "tabular",
         transform=None,
-        u_zeros: bool = True
+        u_zeros: bool = True,
     ):
         self.data_dir = Path(data_dir)
         self.mode = mode
@@ -59,6 +54,7 @@ class CheXpertDataset(Dataset):
             raise FileNotFoundError(f"No CSV files found in {self.data_dir}")
         
         self.df = pd.concat(dfs, ignore_index=True)
+        self.df = self.df.head(5000)
         
         for col in self.PATHOLOGY_COLUMNS:
             if col in self.df.columns:
@@ -68,6 +64,10 @@ class CheXpertDataset(Dataset):
         
         if self.mode == "tabular":
             self._prepare_encoders()
+        elif self.mode == "text":
+            if tokenizer is None:
+                raise ValueError("Tokenizer must be specified if not in tabular mode")
+            self.tokenizer = AutoTokenizer.from_pretrained(tokenizer)
         
         self.transform = transform if transform is not None else transforms.Compose([
             transforms.Resize((224, 224)),
@@ -114,7 +114,7 @@ class CheXpertDataset(Dataset):
         position = row.get('AP/PA', 'Unknown')
         
         return f"Patient: {sex}, Age {age}. X-ray view: {view} {position}."
-    
+
     def _get_labels(self, idx: int) -> torch.Tensor:
         """Get pathology labels as tensor."""
         row = self.df.iloc[idx]
@@ -134,18 +134,34 @@ class CheXpertDataset(Dataset):
         
         if self.mode == "tabular":
             metadata = self._get_metadata_tabular(idx)
-        else:
+        elif self.mode == "text":
             metadata = self._get_metadata_text(idx)
-        
+        else:
+            metadata = None
+
         labels = self._get_labels(idx)
         
         return image, metadata, labels
+    
+    def text_collate_fn(self, batch):
+        images, texts, labels = zip(*batch)
+
+        images = torch.stack(images)
+        texts = self.tokenizer(
+            list(texts),
+            padding=True,
+            truncation=True,
+            return_tensors="pt"
+        )
+        labels = torch.stack(labels)
+        return images, texts, labels
 
 
 def get_dataloaders(
     batch_size: int = 32,
     num_workers: int = 4,
-    mode: Literal["tabular", "text"] = "tabular",
+    mode: Literal["tabular", "text", "mono"] = "tabular",
+    tokenizer: str = None,
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
@@ -153,7 +169,7 @@ def get_dataloaders(
 ):
     assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, "Ratios must sum to 1.0"
     
-    full_dataset = CheXpertDataset(data_dir, mode=mode)
+    full_dataset = CheXpertDataset(data_dir, mode=mode, tokenizer=tokenizer)
     
     total_size = len(full_dataset)
     train_size = int(total_size * train_ratio)
@@ -173,7 +189,7 @@ def get_dataloaders(
     }
     
     if mode == "text":
-        loader_args["collate_fn"] = text_collate_fn
+        loader_args["collate_fn"] = full_dataset.text_collate_fn
     
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, **loader_args)
