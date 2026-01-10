@@ -54,7 +54,6 @@ class CheXpertDataset(Dataset):
             raise FileNotFoundError(f"No CSV files found in {self.data_dir}")
         
         self.df = pd.concat(dfs, ignore_index=True)
-        self.df = self.df.head(5000)
         
         for col in self.PATHOLOGY_COLUMNS:
             if col in self.df.columns:
