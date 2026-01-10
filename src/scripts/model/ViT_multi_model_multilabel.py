@@ -94,8 +94,8 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         images, metadata, labels = batch        
         x = {
             "pixel_values": images,
-            "input_ids": metadata["input_ids"].to(self.device),
-            "attention_mask": metadata["attention_mask"].to(self.device)
+            "input_ids": metadata["input_ids"],
+            "attention_mask": metadata["attention_mask"]
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
@@ -133,8 +133,8 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         images, metadata, labels = batch        
         x = {
             "pixel_values": images,
-            "input_ids": metadata["input_ids"].to(self.device),
-            "attention_mask": metadata["attention_mask"].to(self.device)
+            "input_ids": metadata["input_ids"],
+            "attention_mask": metadata["attention_mask"]
         }        
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
@@ -168,8 +168,26 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
                 lr=self.lr
                 )
         return optimizer
+    
+    def predict(self, batch):
+        images, metadata, labels = batch
+        x = {
+            "pixel_values": images,
+            "input_ids": metadata["input_ids"],
+            "attention_mask": metadata["attention_mask"]
+        }        
+        logits = self(x)
+        probs = torch.sigmoid(logits)
+        preds = (probs > self.prediction_threshold)
+        return preds        
             
     def predict_step(self, x):
+        images, metadata, labels = x        
+        x = {
+            "pixel_values": images,
+            "input_ids": metadata["input_ids"],
+            "attention_mask": metadata["attention_mask"]
+        }        
         # change logits into probabilities and later take only over the threshold
         logits = self(x)
         probs = torch.sigmoid(logits)
@@ -317,9 +335,25 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
     def on_test_epoch_end(self):
         self.log("test_auroc", self.test_auroc.compute())
         self.log("test_map", self.test_ap.compute())
-        self.log("test_f1", self.test_f1.compute())    
+        self.log("test_f1", self.test_f1.compute())
+        
+    def predict(self, batch):
+        images, metadata, _ = batch
+        x = {
+            "pixel_values": images,
+            "tabular_values": metadata
+        }
+        logits = self(x)
+        probs = torch.sigmoid(logits)
+        preds = (probs > self.prediction_threshold)
+        return preds        
         
     def predict_step(self, x):
+        images, metadata, labels = x
+        x = {
+            "pixel_values": images,
+            "tabular_values": metadata
+        }
         # change logits into probabilities and later take only over the threshold
         logits = self(x)
         probs = torch.sigmoid(logits)
@@ -508,7 +542,21 @@ class ViTMonoMultilabelModel(L.LightningModule):
         self.log("test_map", self.test_ap.compute())
         self.log("test_f1", self.test_f1.compute())
         
+    def predict(self, batch):
+        images, _, _ = batch
+        x = {
+            "pixel_values": images
+        }
+        logits = self(x)
+        probs = torch.sigmoid(logits)
+        preds = (probs > self.prediction_threshold)
+        return preds        
+        
     def predict_step(self, x):
+        images, _, _  = x
+        x = {
+            "pixel_values": images
+        }
         # change logits into probabilities and later take only over the threshold
         logits = self(x)
         probs = torch.sigmoid(logits)

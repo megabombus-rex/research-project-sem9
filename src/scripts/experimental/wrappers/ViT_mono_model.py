@@ -13,7 +13,5 @@ class ViTModel(BaseModel):
         return self.model(x)
     
     def predict(self, x):
-        with torch.no_grad():
-            pred = self.model.predict_step(x)
-        
-        return pred        
+        preds = self.model.predict(x)        
+        return preds        
