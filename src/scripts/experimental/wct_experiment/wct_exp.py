@@ -2,7 +2,8 @@ import random
 import time
 import numpy as np
 import torch
-from scripts.data.dataset import get_dataloaders
+from tqdm import tqdm
+from src.scripts.data.dataset import get_dataloaders
 from src.scripts.experimental.wrappers.ViT_mono_model import ViTModel
 from src.scripts.model.ViT_multi_model_multilabel import ViTMonoMultilabelModel, ViTTabMultiModalMultilabelModel, ViTTextMultiModalMultilabelModel
 from src.scripts.util.config_reader import load_models_config
@@ -27,23 +28,23 @@ class WallClockTimeExperiment:
         mean_times = np.zeros((self.iterations))
         synchronize = False 
         
-        if device is not None:
-            self.model.to(device)
+        if device is not None and device != 'cpu':
+            self.model.model.to(device)
             if device == "cuda":
                 synchronize = True
         
         self.model.model.eval()
 
-        for i in range(self.iterations):
+        for i in tqdm(range(self.iterations)):
             n_seen = 0
             if synchronize:
                 torch.cuda.synchronize()
             start_time = time.time()
             with torch.no_grad():
                 for batch in data_loader:
-                    if device is not None:
-                        batch = {k: v.to(device) for k, v in batch.items()}
-                    
+                    if device is not None and device != 'cpu':
+                        # batch = {k: v.to(device) for k, v in batch.items()}
+                        batch = [b.to(device) for b in batch]
                     _ = self.model.predict(batch)
                     n_seen += 1
                     if n_seen >= self.n_samples:
@@ -67,15 +68,17 @@ if __name__ == '__main__':
     NUM_WORKERS = 0
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     
-    N_SAMPLES = 10000
+    N_SAMPLES = 100
     ITERATIONS = 5
     SEED = 42
 
     print('========== WCT Experiment Monomodal ViT ==========')
+    print(f'Device: {DEVICE}')
 
     _, _, test_set = get_dataloaders(
         train_ratio=0.1,
-        test_ratio=0.9,
+        val_ratio = 0.1,
+        test_ratio=0.8,
         batch_size=BATCH_SIZE, 
         num_workers=NUM_WORKERS,
         mode="mono"
@@ -93,7 +96,8 @@ if __name__ == '__main__':
     
     _, _, test_set = get_dataloaders(
         train_ratio=0.1,
-        test_ratio=0.9,
+        val_ratio = 0.1,
+        test_ratio=0.8,
         batch_size=BATCH_SIZE, 
         num_workers=NUM_WORKERS,
         mode="tabular"
@@ -111,7 +115,8 @@ if __name__ == '__main__':
     
     _, _, test_set = get_dataloaders(
         train_ratio=0.1,
-        test_ratio=0.9,
+        val_ratio = 0.1,
+        test_ratio=0.8,
         batch_size=BATCH_SIZE, 
         num_workers=NUM_WORKERS,
         mode="text", 
@@ -124,5 +129,4 @@ if __name__ == '__main__':
     multiTextVisionModel = ViTModel(vit_text)
     
     exp = WallClockTimeExperiment(model=multiTextVisionModel, n_samples=N_SAMPLES, iterations=ITERATIONS, seed=SEED)
-    exp.run(test_set, device=DEVICE)
-    
+    exp.run(test_set, device=DEVICE)    
