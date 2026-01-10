@@ -136,7 +136,7 @@ class CheXpertDataset(Dataset):
         elif self.mode == "text":
             metadata = self._get_metadata_text(idx)
         else:
-            metadata = None
+            metadata = ""
 
         labels = self._get_labels(idx)
         
