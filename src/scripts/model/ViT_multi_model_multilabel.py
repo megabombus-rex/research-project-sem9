@@ -11,6 +11,7 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         self, 
         config, 
         num_classes: int, 
+        prediction_threshold: float = 0.5,
         lr: float = 1e-3, 
         optimizer: str = "SGD"
     ):
@@ -29,6 +30,9 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         self.text_model         = AutoModel.from_pretrained(self.text_model_name)
         vision_dim, text_dim    = self.vision_model.config.hidden_size, self.text_model.config.hidden_size
         self.fusion             = FusionModule(vision_dim + text_dim, num_classes)
+        self.layer_norm_v = nn.LayerNorm(vision_dim)
+        self.layer_norm_t = nn.LayerNorm(text_dim)
+
 
         for p in self.vision_model.parameters():
             p.requires_grad = False
@@ -38,48 +42,68 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
 
         self.loss_fn = nn.BCEWithLogitsLoss()
 
+        self.prediction_threshold = prediction_threshold
         self.val_auroc = MultilabelAUROC(
             num_labels=self.num_classes,
-            average="macro"
+            average="macro",
+            thresholds=[self.prediction_threshold]
         )
 
-        self.val_ap = MultilabelAveragePrecision(
+        self.val_ap_macro = MultilabelAveragePrecision(
             num_labels=self.num_classes,
-            average="macro"
+            average="macro",
+            thresholds=[self.prediction_threshold]
+        )
+
+        self.val_ap_micro = MultilabelAveragePrecision(
+            num_labels=self.num_classes,
+            average="micro",
+            thresholds=[self.prediction_threshold]
         )
 
         self.val_f1 = MultilabelF1Score(
             num_labels=self.num_classes,
             average="macro",
-            threshold=0.5
+            threshold=self.prediction_threshold
         )
 
         self.test_auroc = MultilabelAUROC(
             num_labels=self.num_classes,
-            average="macro"
+            average="macro",
+            thresholds=[self.prediction_threshold]
         )
 
         self.test_ap = MultilabelAveragePrecision(
             num_labels=self.num_classes,
-            average="macro"
+            average="macro",
+            thresholds=[self.prediction_threshold]
+        )
+
+        self.test_ap_micro = MultilabelAveragePrecision(
+            num_labels=self.num_classes,
+            average="micro",
+            thresholds=[self.prediction_threshold]
         )
 
         self.test_f1 = MultilabelF1Score(
             num_labels=self.num_classes,
             average="macro",
-            threshold=0.5
+            threshold=self.prediction_threshold
         )
 
     def forward(self, x):
         pixel_values = x["pixel_values"]
-        input_ids = x["input_ids"]
-        attention_mask = x["attention_mask"]
+        input_ids = x["input_ids"].to(self.device)
+        attention_mask = x["attention_mask"].to(self.device)
 
         with torch.no_grad():
             outputs_v = self.vision_model(pixel_values)
             outputs_t = self.text_model(input_ids, attention_mask)
         img_embeds = outputs_v.last_hidden_state[:, 0]
         txt_embeds = outputs_t.last_hidden_state[:, 0]
+
+        img_embeds = self.layer_norm_v(img_embeds)
+        txt_embeds = self.layer_norm_t(txt_embeds)
 
         logits = self.fusion(img_embeds, txt_embeds)
         return logits
@@ -88,8 +112,8 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         images, metadata, labels = batch        
         x = {
             "pixel_values": images,
-            "input_ids": metadata["input_ids"].to(self.device),
-            "attention_mask": metadata["attention_mask"].to(self.device)
+            "input_ids": metadata["input_ids"],
+            "attention_mask": metadata["attention_mask"]
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
@@ -105,10 +129,11 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         }
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
-        probs = torch.sigmoid(logits)
+        probs = torch.sigmoid(logits) # preds = probs here
 
         self.val_auroc.update(probs, labels.int())
-        self.val_ap.update(probs, labels.int())
+        self.val_ap_macro.update(probs, labels.int())
+        self.val_ap_micro.update(probs, labels.int())
         self.val_f1.update(probs, labels.int())
 
         self.log("val_loss", loss, prog_bar=True, batch_size=images.size(0))
@@ -116,19 +141,21 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
     
     def on_validation_epoch_end(self):
         self.log("val_auroc", self.val_auroc.compute(), prog_bar=True)
-        self.log("val_map", self.val_ap.compute(), prog_bar=True)
+        self.log("val_map", self.val_ap_macro.compute(), prog_bar=True)
+        self.log("val_map_micro", self.test_ap_micro.compute(), prog_bar=True)
         self.log("val_f1", self.val_f1.compute(), prog_bar=True)
 
         self.val_auroc.reset()
-        self.val_ap.reset()
+        self.val_ap_macro.reset()
+        self.val_ap_micro.reset()
         self.val_f1.reset()
         
     def test_step(self, batch, batch_idx):
         images, metadata, labels = batch        
         x = {
             "pixel_values": images,
-            "input_ids": metadata["input_ids"].to(self.device),
-            "attention_mask": metadata["attention_mask"].to(self.device)
+            "input_ids": metadata["input_ids"],
+            "attention_mask": metadata["attention_mask"]
         }        
         logits = self(x)
         loss = self.loss_fn(logits, labels.float())
@@ -136,6 +163,7 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
 
         self.test_auroc.update(probs, labels.int())
         self.test_ap.update(probs, labels.int())
+        self.test_ap_micro.update(probs, labels.int())
         self.test_f1.update(probs, labels.int())
         self.log("test_loss", loss, batch_size=images.size(0))
         return loss
@@ -144,7 +172,6 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         self.log("test_auroc", self.test_auroc.compute())
         self.log("test_map", self.test_ap.compute())
         self.log("test_f1", self.test_f1.compute())    
-
 
     def configure_optimizers(self):
         if self.optimizer_name.lower() == "sgd":
@@ -162,14 +189,40 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
                 filter(lambda p: p.requires_grad, self.parameters()), 
                 lr=self.lr
                 )
-
         return optimizer
+    
+    def predict(self, batch):
+        images, metadata, labels = batch
+        x = {
+            "pixel_values": images,
+            "input_ids": metadata["input_ids"],
+            "attention_mask": metadata["attention_mask"]
+        }        
+        logits = self(x)
+        probs = torch.sigmoid(logits)
+        preds = (probs > self.prediction_threshold)
+        return preds        
+            
+    def predict_step(self, x):
+        images, metadata, labels = x        
+        x = {
+            "pixel_values": images,
+            "input_ids": metadata["input_ids"],
+            "attention_mask": metadata["attention_mask"]
+        }        
+        # change logits into probabilities and later take only over the threshold
+        logits = self(x)
+        probs = torch.sigmoid(logits)
+        preds = (probs > self.prediction_threshold)
+        return preds
+
     
 class ViTTabMultiModalMultilabelModel(L.LightningModule):
     def __init__(
         self,
         config,
         num_classes: int,
+        prediction_threshold: float = 0.5,
         lr: float = 1e-3,
         optimizer: str = "SGD"
     ):
@@ -188,6 +241,8 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
 
         vision_dim = self.vision_model.config.hidden_size
         tab_dim = self.tabular_model.embed_dim
+        self.layer_norm_v = nn.LayerNorm(vision_dim)
+        self.layer_norm_t = nn.LayerNorm(tab_dim)
 
         self.fusion = FusionModule(vision_dim + tab_dim, num_classes)
 
@@ -197,36 +252,54 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
         # due to multilabel logic - this should be the loss
         self.loss_fn = nn.BCEWithLogitsLoss()
 
+        self.prediction_threshold = prediction_threshold
         self.val_auroc = MultilabelAUROC(
             num_labels=self.num_classes,
-            average="macro"
+            average="macro",
+            thresholds=[self.prediction_threshold]
         )
 
         self.val_ap = MultilabelAveragePrecision(
             num_labels=self.num_classes,
-            average="macro"
+            average="macro",
+            thresholds=[self.prediction_threshold]
         )
+
+        self.val_ap_micro = MultilabelAveragePrecision(
+            num_labels=self.num_classes,
+            average="micro",
+            thresholds=[self.prediction_threshold]
+        )
+
 
         self.val_f1 = MultilabelF1Score(
             num_labels=self.num_classes,
             average="macro",
-            threshold=0.5
+            threshold=self.prediction_threshold
         )
 
         self.test_auroc = MultilabelAUROC(
             num_labels=self.num_classes,
-            average="macro"
+            average="macro",
+            thresholds=[self.prediction_threshold]
         )
 
         self.test_ap = MultilabelAveragePrecision(
             num_labels=self.num_classes,
-            average="macro"
+            average="macro",
+            thresholds=[self.prediction_threshold]
+        )
+
+        self.test_ap_micro = MultilabelAveragePrecision(
+            num_labels=self.num_classes,
+            average="micro",
+            thresholds=[self.prediction_threshold]
         )
 
         self.test_f1 = MultilabelF1Score(
             num_labels=self.num_classes,
             average="macro",
-            threshold=0.5
+            threshold=self.prediction_threshold
         )
 
     def forward(self, x):
@@ -266,6 +339,7 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
 
         self.val_auroc.update(probs, labels.int())
         self.val_ap.update(probs, labels.int())
+        self.val_ap_micro.update(probs, labels.int())
         self.val_f1.update(probs, labels.int())
 
         self.log("val_loss", loss, prog_bar=True, batch_size=images.size(0))
@@ -278,6 +352,7 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
 
         self.val_auroc.reset()
         self.val_ap.reset()
+        self.val_ap_micro.reset()
         self.val_f1.reset()
 
     def test_step(self, batch, batch_idx):
@@ -292,6 +367,7 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
 
         self.test_auroc.update(probs, labels.int())
         self.test_ap.update(probs, labels.int())
+        self.test_ap_micro.update(probs, labels.int())
         self.test_f1.update(probs, labels.int())
         self.log("test_loss", loss, batch_size=images.size(0))
         return loss
@@ -299,16 +375,49 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
     def on_test_epoch_end(self):
         self.log("test_auroc", self.test_auroc.compute())
         self.log("test_map", self.test_ap.compute())
-        self.log("test_f1", self.test_f1.compute())    
+        self.log("test_map_micro", self.test_ap_micro.compute())
+        self.log("test_f1", self.test_f1.compute())
+        
+    def predict(self, batch):
+        images, metadata, _ = batch
+        x = {
+            "pixel_values": images,
+            "tabular_values": metadata
+        }
+        logits = self(x)
+        probs = torch.sigmoid(logits)
+        preds = (probs > self.prediction_threshold)
+        return preds        
+        
+    def predict_step(self, x):
+        images, metadata, labels = x
+        x = {
+            "pixel_values": images,
+            "tabular_values": metadata
+        }
+        # change logits into probabilities and later take only over the threshold
+        logits = self(x)
+        probs = torch.sigmoid(logits)
+        preds = (probs > self.prediction_threshold)
+        return preds
 
+    
     def configure_optimizers(self):
         if self.optimizer_name.lower() == "sgd":
-            optimizer = torch.optim.SGD(self.parameters(), lr=self.lr)
+            optimizer = torch.optim.SGD(
+                filter(lambda p: p.requires_grad, self.parameters()), 
+                lr=self.lr
+                )
         if self.optimizer_name.lower() == "adamw":
-            optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
+            optimizer = torch.optim.AdamW(
+                filter(lambda p: p.requires_grad, self.parameters()), 
+                lr=self.lr
+                )
         else:
-            optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
-
+            optimizer = torch.optim.Adam(
+                filter(lambda p: p.requires_grad, self.parameters()), 
+                lr=self.lr
+                )
         return optimizer
         
 class TabularTransformerModel(nn.Module):    
@@ -347,6 +456,7 @@ class ViTMonoMultilabelModel(L.LightningModule):
         self,
         config,
         num_classes: int,
+        prediction_threshold: float = 0.5,
         lr: float = 1e-3,
         optimizer: str = "SGD"
     ):
@@ -374,36 +484,53 @@ class ViTMonoMultilabelModel(L.LightningModule):
         # due to multilabel logic - this should be the loss
         self.loss_fn = nn.BCEWithLogitsLoss()
 
+        self.prediction_threshold = prediction_threshold
         self.val_auroc = MultilabelAUROC(
             num_labels=self.num_classes,
-            average="macro"
+            average="macro",
+            thresholds=[self.prediction_threshold]
         )
 
         self.val_ap = MultilabelAveragePrecision(
             num_labels=self.num_classes,
-            average="macro"
+            average="macro",
+            thresholds=[self.prediction_threshold]
+        )
+
+        self.val_ap_micro = MultilabelAveragePrecision(
+            num_labels=self.num_classes,
+            average="micro",
+            thresholds=[self.prediction_threshold]
         )
 
         self.val_f1 = MultilabelF1Score(
             num_labels=self.num_classes,
             average="macro",
-            threshold=0.5
+            threshold=self.prediction_threshold
         )
 
         self.test_auroc = MultilabelAUROC(
             num_labels=self.num_classes,
-            average="macro"
+            average="macro",
+            thresholds=[self.prediction_threshold]
         )
 
         self.test_ap = MultilabelAveragePrecision(
             num_labels=self.num_classes,
-            average="macro"
+            average="macro",
+            thresholds=[self.prediction_threshold]
+        )
+
+        self.test_ap_micro = MultilabelAveragePrecision(
+            num_labels=self.num_classes,
+            average="micro",
+            thresholds=[self.prediction_threshold]
         )
 
         self.test_f1 = MultilabelF1Score(
             num_labels=self.num_classes,
             average="macro",
-            threshold=0.5
+            threshold=self.prediction_threshold
         )
 
     def forward(self, x):
@@ -434,6 +561,7 @@ class ViTMonoMultilabelModel(L.LightningModule):
 
         self.val_auroc.update(probs, labels.int())
         self.val_ap.update(probs, labels.int())
+        self.val_ap_micro.update(probs, labels.int())
         self.val_f1.update(probs, labels.int())
 
         self.log("val_loss", loss, prog_bar=True, batch_size=images.size(0))
@@ -446,6 +574,7 @@ class ViTMonoMultilabelModel(L.LightningModule):
 
         self.val_auroc.reset()
         self.val_ap.reset()
+        self.val_ap_micro.reset()
         self.val_f1.reset()
 
     def test_step(self, batch, batch_idx):
@@ -459,6 +588,7 @@ class ViTMonoMultilabelModel(L.LightningModule):
 
         self.test_auroc.update(probs, labels.int())
         self.test_ap.update(probs, labels.int())
+        self.test_ap_micro.update(probs, labels.int())
         self.test_f1.update(probs, labels.int())
         self.log("test_loss", loss, batch_size=images.size(0))
         return loss
@@ -466,7 +596,29 @@ class ViTMonoMultilabelModel(L.LightningModule):
     def on_test_epoch_end(self):
         self.log("test_auroc", self.test_auroc.compute())
         self.log("test_map", self.test_ap.compute())
-        self.log("test_f1", self.test_f1.compute())    
+        self.log("test_map_micro", self.test_ap_micro.compute())
+        self.log("test_f1", self.test_f1.compute())
+        
+    def predict(self, batch):
+        images, _, _ = batch
+        x = {
+            "pixel_values": images
+        }
+        logits = self(x)
+        probs = torch.sigmoid(logits)
+        preds = (probs > self.prediction_threshold)
+        return preds        
+        
+    def predict_step(self, x):
+        images, _, _  = x
+        x = {
+            "pixel_values": images
+        }
+        # change logits into probabilities and later take only over the threshold
+        logits = self(x)
+        probs = torch.sigmoid(logits)
+        preds = (probs > self.prediction_threshold)
+        return preds
 
     def configure_optimizers(self):
         if self.optimizer_name.lower() == "sgd":
