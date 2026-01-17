@@ -16,7 +16,7 @@ class WallClockTimeExperiment:
         model: BaseModel,
         n_samples: int = 10000,
         iterations: int = 5,
-        seed: int = 42,
+        seed: int = 42
     ):
         self.model = model
         self.n_samples = n_samples
@@ -43,8 +43,7 @@ class WallClockTimeExperiment:
             with torch.no_grad():
                 for batch in data_loader:
                     if device is not None and device != 'cpu':
-                        # batch = {k: v.to(device) for k, v in batch.items()}
-                        batch = [b.to(device) for b in batch]
+                        batch = [b.to(device) if torch.is_tensor(b) else b for b in batch]
                     _ = self.model.predict(batch)
                     n_seen += 1
                     if n_seen >= self.n_samples:
@@ -67,13 +66,13 @@ if __name__ == '__main__':
     BATCH_SIZE = 1
     NUM_WORKERS = 0
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f'Device: {DEVICE}')
     
-    N_SAMPLES = 100
+    N_SAMPLES = 1000
     ITERATIONS = 5
     SEED = 42
 
     print('========== WCT Experiment Monomodal ViT ==========')
-    print(f'Device: {DEVICE}')
 
     _, _, test_set = get_dataloaders(
         train_ratio=0.1,
