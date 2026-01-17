@@ -30,8 +30,8 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         self.text_model         = AutoModel.from_pretrained(self.text_model_name)
         vision_dim, text_dim    = self.vision_model.config.hidden_size, self.text_model.config.hidden_size
         self.fusion             = FusionModule(vision_dim + text_dim, num_classes)
-        self.layer_norm_v = nn.LayerNorm(vision_dim)
-        self.layer_norm_t = nn.LayerNorm(text_dim)
+        self.layer_norm_v       = nn.LayerNorm(vision_dim)
+        self.layer_norm_t       = nn.LayerNorm(text_dim)
 
 
         for p in self.vision_model.parameters():
@@ -46,49 +46,49 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         self.val_auroc = MultilabelAUROC(
             num_labels=self.num_classes,
             average="macro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.val_ap_macro = MultilabelAveragePrecision(
             num_labels=self.num_classes,
             average="macro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.val_ap_micro = MultilabelAveragePrecision(
             num_labels=self.num_classes,
             average="micro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.val_f1 = MultilabelF1Score(
             num_labels=self.num_classes,
             average="macro",
-            threshold=self.prediction_threshold
+            #threshold=self.prediction_threshold
         )
 
         self.test_auroc = MultilabelAUROC(
             num_labels=self.num_classes,
             average="macro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.test_ap = MultilabelAveragePrecision(
             num_labels=self.num_classes,
             average="macro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.test_ap_micro = MultilabelAveragePrecision(
             num_labels=self.num_classes,
             average="micro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.test_f1 = MultilabelF1Score(
             num_labels=self.num_classes,
             average="macro",
-            threshold=self.prediction_threshold
+            #threshold=self.prediction_threshold
         )
 
     def forward(self, x):
@@ -142,7 +142,7 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
     def on_validation_epoch_end(self):
         self.log("val_auroc", self.val_auroc.compute(), prog_bar=True)
         self.log("val_map", self.val_ap_macro.compute(), prog_bar=True)
-        self.log("val_map_micro", self.test_ap_micro.compute(), prog_bar=True)
+        self.log("val_map_micro", self.val_ap_micro.compute(), prog_bar=True)
         self.log("val_f1", self.val_f1.compute(), prog_bar=True)
 
         self.val_auroc.reset()
@@ -256,50 +256,50 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
         self.val_auroc = MultilabelAUROC(
             num_labels=self.num_classes,
             average="macro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.val_ap = MultilabelAveragePrecision(
             num_labels=self.num_classes,
             average="macro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.val_ap_micro = MultilabelAveragePrecision(
             num_labels=self.num_classes,
             average="micro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
 
         self.val_f1 = MultilabelF1Score(
             num_labels=self.num_classes,
             average="macro",
-            threshold=self.prediction_threshold
+            #threshold=self.prediction_threshold
         )
 
         self.test_auroc = MultilabelAUROC(
             num_labels=self.num_classes,
             average="macro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.test_ap = MultilabelAveragePrecision(
             num_labels=self.num_classes,
             average="macro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.test_ap_micro = MultilabelAveragePrecision(
             num_labels=self.num_classes,
             average="micro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.test_f1 = MultilabelF1Score(
             num_labels=self.num_classes,
             average="macro",
-            threshold=self.prediction_threshold
+            #threshold=self.prediction_threshold
         )
 
     def forward(self, x):
@@ -312,6 +312,9 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
         
         tab_embeds = self.tabular_model(tabular_values)
         img_embeds = outputs_v.last_hidden_state[:, 0]
+
+        tab_embeds = self.layer_norm_t(tab_embeds)
+        img_embeds = self.layer_norm_v(img_embeds)
 
         logits = self.fusion(img_embeds, tab_embeds)
         return logits
@@ -488,49 +491,49 @@ class ViTMonoMultilabelModel(L.LightningModule):
         self.val_auroc = MultilabelAUROC(
             num_labels=self.num_classes,
             average="macro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.val_ap = MultilabelAveragePrecision(
             num_labels=self.num_classes,
             average="macro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.val_ap_micro = MultilabelAveragePrecision(
             num_labels=self.num_classes,
             average="micro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.val_f1 = MultilabelF1Score(
             num_labels=self.num_classes,
             average="macro",
-            threshold=self.prediction_threshold
+            #threshold=self.prediction_threshold
         )
 
         self.test_auroc = MultilabelAUROC(
             num_labels=self.num_classes,
             average="macro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.test_ap = MultilabelAveragePrecision(
             num_labels=self.num_classes,
             average="macro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.test_ap_micro = MultilabelAveragePrecision(
             num_labels=self.num_classes,
             average="micro",
-            thresholds=[self.prediction_threshold]
+            #thresholds=[self.prediction_threshold]
         )
 
         self.test_f1 = MultilabelF1Score(
             num_labels=self.num_classes,
             average="macro",
-            threshold=self.prediction_threshold
+            #threshold=self.prediction_threshold
         )
 
     def forward(self, x):
