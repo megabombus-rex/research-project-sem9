@@ -168,9 +168,16 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         self.log("test_loss", loss, batch_size=images.size(0))
         return loss
     
+    def on_test_epoch_start(self):
+        self.test_auroc.reset()
+        self.test_ap.reset()
+        self.test_ap_micro.reset()
+        self.test_f1.reset()
+    
     def on_test_epoch_end(self):
         self.log("test_auroc", self.test_auroc.compute())
         self.log("test_map", self.test_ap.compute())
+        self.log("test_map_micro", self.test_ap_micro.compute())
         self.log("test_f1", self.test_f1.compute())    
 
     def configure_optimizers(self):
@@ -351,6 +358,7 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
     def on_validation_epoch_end(self):
         self.log("val_auroc", self.val_auroc.compute(), prog_bar=True)
         self.log("val_map", self.val_ap.compute(), prog_bar=True)
+        self.log("val_map_micro", self.val_ap_micro.compute(), prog_bar=True)
         self.log("val_f1", self.val_f1.compute(), prog_bar=True)
 
         self.val_auroc.reset()
@@ -374,6 +382,12 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
         self.test_f1.update(probs, labels.int())
         self.log("test_loss", loss, batch_size=images.size(0))
         return loss
+    
+    def on_test_epoch_start(self):
+        self.test_auroc.reset()
+        self.test_ap.reset()
+        self.test_ap_micro.reset()
+        self.test_f1.reset()
     
     def on_test_epoch_end(self):
         self.log("test_auroc", self.test_auroc.compute())
@@ -596,6 +610,12 @@ class ViTMonoMultilabelModel(L.LightningModule):
         self.log("test_loss", loss, batch_size=images.size(0))
         return loss
     
+    def on_test_epoch_start(self):
+        self.test_auroc.reset()
+        self.test_ap.reset()
+        self.test_ap_micro.reset()
+        self.test_f1.reset()
+
     def on_test_epoch_end(self):
         self.log("test_auroc", self.test_auroc.compute())
         self.log("test_map", self.test_ap.compute())
