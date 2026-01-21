@@ -13,7 +13,7 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         num_classes: int, 
         prediction_threshold: float = 0.5,
         lr: float = 1e-3, 
-        optimizer: str = "SGD"
+        optimizer: str = "AdamW"
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -231,7 +231,7 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
         num_classes: int,
         prediction_threshold: float = 0.5,
         lr: float = 1e-3,
-        optimizer: str = "SGD"
+        optimizer: str = "AdamW"
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -475,7 +475,7 @@ class ViTMonoMultilabelModel(L.LightningModule):
         num_classes: int,
         prediction_threshold: float = 0.5,
         lr: float = 1e-3,
-        optimizer: str = "SGD"
+        optimizer: str = "AdamW"
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -551,8 +551,9 @@ class ViTMonoMultilabelModel(L.LightningModule):
         )
 
     def forward(self, x):
-        with torch.no_grad():
-            outputs_v = self.vision_model(x["pixel_values"])
+        # with torch.no_grad():
+            # outputs_v = self.vision_model(x["pixel_values"])
+        outputs_v = self.vision_model(x["pixel_values"])
         logits = self.classifier(outputs_v.last_hidden_state[:, 0])
         return logits
     
@@ -566,6 +567,9 @@ class ViTMonoMultilabelModel(L.LightningModule):
         loss = self.loss_fn(logits, labels.float())
         self.log("train_loss", loss, prog_bar=True, batch_size=images.size(0))
         return loss
+    
+    # def on_train_start(self):
+    #     self.vision_model.train()        
 
     def validation_step(self, batch, batch_idx):
         images, _, labels = batch

@@ -15,8 +15,8 @@ from src.scripts.model.ViT_multi_model_multilabel import ViTMonoMultilabelModel,
 from src.scripts.util.config_reader import load_models_config
 from src.scripts.experimental.wrappers.experiment_model import BaseModel
 
-BATCH_SIZE = 32
-NUM_WORKERS = 4
+BATCH_SIZE = 64
+NUM_WORKERS = 8
 
 PATHOLOGY_COLUMNS = [
     'No Finding', 'Enlarged Cardiomediastinum', 'Cardiomegaly',
@@ -38,7 +38,6 @@ class KFoldExperiment:
         self.mode = mode
 
     def run(self, device = None):
-        print(f'Config: {self.config}')
         dataset = get_dataset(mode=self.mode, tokenizer=self.config.get('text-model', None))
         X = dataset.df.drop(columns=PATHOLOGY_COLUMNS)
         y = dataset.df[PATHOLOGY_COLUMNS].values
@@ -50,7 +49,7 @@ class KFoldExperiment:
             n_splits=self.n_folds, n_repeats=self.n_repeats, random_state=self.seed
         )
         model_type = type(self.model.model)
-        model_str = str(model_type).replace('class', '').replace('src.scripts.model.', '')
+        model_str = str(model_type).replace('class', '').replace('src.scripts.model.', '').replace('\'', '').replace('-', '') + f'v2_f{self.n_folds}_r{self.n_repeats}_ep{self.max_epochs}_fulldataset'
         checkpoint_callback = ModelCheckpoint(
             monitor="train_loss",
             dirpath="data/models/kfold",
@@ -65,6 +64,8 @@ class KFoldExperiment:
         F1s = np.zeros(self.n_folds * self.n_repeats)
 
         for i, (train_idx, test_idx) in enumerate(rmskf.split(X, y)):
+            print(f'Fold {i // self.n_folds}/{self.n_folds}')
+            print(f'Repeat {i // self.n_repeats}/{self.n_repeats}')
             model = model_type(self.config, num_classes=14)
             train_set = Subset(dataset, train_idx)
             test_set = Subset(dataset, test_idx)
@@ -73,18 +74,20 @@ class KFoldExperiment:
                 "batch_size": BATCH_SIZE,
                 "num_workers": NUM_WORKERS,
                 "pin_memory": True,
+                "prefetch_factor": 4
             }
 
             if self.mode == "text":
                 loader_args["collate_fn"] = dataset.text_collate_fn
 
-            train_loader = DataLoader(train_set, shuffle=True, **loader_args)
-            test_loader = DataLoader(test_set, shuffle=False, **loader_args)
+            train_loader = DataLoader(train_set, shuffle=True, persistent_workers=True, **loader_args)
+            test_loader = DataLoader(test_set, shuffle=False, persistent_workers=True, **loader_args)
             
             trainer = L.Trainer(
                 max_epochs=self.max_epochs,
                 accelerator= 'cuda' if torch.cuda.is_available() else 'cpu',
-                log_every_n_steps=1,
+                precision="16-mixed",
+                # log_every_n_steps=1,
                 deterministic=True,
                 callbacks=[checkpoint_callback])
             
@@ -93,8 +96,8 @@ class KFoldExperiment:
             print(f'Result: {result}')
             losses[i] = result[0]['test_loss']
             AUROCs[i] = result[0]['test_auroc']
-            mAPs_micro[i] = result[0]['test_map']
-            mAPs_macro[i] = result[0]['test_map_micro']
+            mAPs_micro[i] = result[0]['test_map_micro']
+            mAPs_macro[i] = result[0]['test_map']
             F1s[i] = result[0]['test_f1']
         
         data = {
@@ -116,10 +119,12 @@ if __name__ == '__main__':
     N_FOLDS = 5
     N_REPEATS = 2
     SEED = 42
-    MAX_EPOCHS = 1
+    MAX_EPOCHS = 5
 
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f'Device: {DEVICE}')
+    
+    L.seed_everything(SEED)
 
     print('========== K-Fold Experiment Monomodal ViT ==========')
     vit_mono = ViTMonoMultilabelModel(
