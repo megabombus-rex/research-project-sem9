@@ -1,3 +1,4 @@
+import json
 import random
 import time
 import numpy as np
@@ -14,11 +15,13 @@ class WallClockTimeExperiment:
     def __init__(
         self,
         model: BaseModel,
+        result_model_name: str,
         n_samples: int = 10000,
         iterations: int = 5,
         seed: int = 42
     ):
         self.model = model
+        self.result_model_name = result_model_name
         self.n_samples = n_samples
         self.iterations = iterations
         self.seed = seed
@@ -54,12 +57,25 @@ class WallClockTimeExperiment:
             end_time = time.time()
             mean_times[i] = (end_time - start_time) / self.n_samples
 
+        mean = np.mean(mean_times)
+        std = np.std(mean_times)
         print(
             f"After {self.iterations} iterations the mean time for each iteration was:"
         )
         for i in range(self.iterations):
             print(f"{i+1}: {mean_times[i]} per sample.")
-        print(f"Mean time across all iterations is {np.mean(mean_times)} per sample.")
+        print(f"Mean time across all iterations is {mean}({std}) per sample .")
+
+        data = {
+            'model': self.result_model_name,
+            'mean_times': mean_times.tolist(),
+            'iterations': self.iterations,
+            'mean_time_per_sample': mean,
+            'std_per_sample': std
+        }
+
+        with open(f'{self.result_model_name}.json', "w") as f:
+            json.dump(data, f)
         
 if __name__ == '__main__':
     config = load_models_config()
@@ -69,7 +85,7 @@ if __name__ == '__main__':
     print(f'Device: {DEVICE}')
     
     N_SAMPLES = 1000
-    ITERATIONS = 5
+    ITERATIONS = 10
     SEED = 42
 
     print('========== WCT Experiment Monomodal ViT ==========')
@@ -88,7 +104,7 @@ if __name__ == '__main__':
     )
     monoVisionModel = ViTModel(vit_mono)
     
-    exp = WallClockTimeExperiment(model=monoVisionModel, n_samples=N_SAMPLES, iterations=ITERATIONS, seed=SEED)
+    exp = WallClockTimeExperiment(model=monoVisionModel, result_model_name='ViT', n_samples=N_SAMPLES, iterations=ITERATIONS, seed=SEED)
     exp.run(test_set, device=DEVICE)
     
     print('========== WCT Experiment ViT + TabTransformer ==========')
@@ -107,7 +123,7 @@ if __name__ == '__main__':
     )
     multiTabVisionModel = ViTModel(vit_tab)
     
-    exp = WallClockTimeExperiment(model=multiTabVisionModel, n_samples=N_SAMPLES, iterations=ITERATIONS, seed=SEED)
+    exp = WallClockTimeExperiment(model=multiTabVisionModel, result_model_name='ViT_TabTransformer', n_samples=N_SAMPLES, iterations=ITERATIONS, seed=SEED)
     exp.run(test_set, device=DEVICE)
     
     print('========== WCT Experiment ViT + BERT ==========')
@@ -127,5 +143,5 @@ if __name__ == '__main__':
     )
     multiTextVisionModel = ViTModel(vit_text)
     
-    exp = WallClockTimeExperiment(model=multiTextVisionModel, n_samples=N_SAMPLES, iterations=ITERATIONS, seed=SEED)
-    exp.run(test_set, device=DEVICE)    
+    exp = WallClockTimeExperiment(model=multiTextVisionModel, result_model_name='ViT_BERT', n_samples=N_SAMPLES, iterations=ITERATIONS, seed=SEED)
+    exp.run(test_set, device=DEVICE)
