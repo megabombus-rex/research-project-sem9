@@ -1,9 +1,12 @@
+from matplotlib import pyplot as plt
 import pytorch_lightning as L
 import torch
 import torch.nn as nn
+from torchmetrics.classification import MultilabelConfusionMatrix
 from transformers import AutoModel, AutoModel, AutoTokenizer
 from torchmetrics.classification import MultilabelAUROC, MultilabelAveragePrecision, MultilabelF1Score
 
+from src.scripts.util.misc import PATHOLOGY_COLUMNS
 from src.scripts.model.fusion_module import FusionModule
 
 class ViTTextMultiModalMultilabelModel(L.LightningModule):
@@ -91,6 +94,8 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
             #threshold=self.prediction_threshold
         )
 
+        self.cm_test = MultilabelConfusionMatrix(num_labels=self.num_classes)
+
     def forward(self, x):
         pixel_values = x["pixel_values"]
         input_ids = x["input_ids"].to(self.device)
@@ -165,6 +170,7 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         self.test_ap.update(probs, labels.int())
         self.test_ap_micro.update(probs, labels.int())
         self.test_f1.update(probs, labels.int())
+        self.cm_test.update(probs, labels.int())
         self.log("test_loss", loss, batch_size=images.size(0))
         return loss
     
@@ -179,6 +185,13 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         self.log("test_map", self.test_ap.compute())
         self.log("test_map_micro", self.test_ap_micro.compute())
         self.log("test_f1", self.test_f1.compute())    
+        fig_, ax_ = self.cm_test.plot(
+            labels=PATHOLOGY_COLUMNS
+            )
+        fig_.set_size_inches(24, 24)
+        plt.tight_layout()
+        plt.savefig('Test-vitbert.png', dpi=300)
+        plt.close(fig_)
 
     def configure_optimizers(self):
         if self.optimizer_name.lower() == "sgd":
@@ -309,6 +322,8 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
             #threshold=self.prediction_threshold
         )
 
+        self.cm_test = MultilabelConfusionMatrix(num_labels=self.num_classes)
+
     def forward(self, x):
         pixel_values = x["pixel_values"]
         tabular_values = x["tabular_values"]
@@ -380,6 +395,7 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
         self.test_ap.update(probs, labels.int())
         self.test_ap_micro.update(probs, labels.int())
         self.test_f1.update(probs, labels.int())
+        self.cm_test.update(probs, labels.int())
         self.log("test_loss", loss, batch_size=images.size(0))
         return loss
     
@@ -394,6 +410,13 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
         self.log("test_map", self.test_ap.compute())
         self.log("test_map_micro", self.test_ap_micro.compute())
         self.log("test_f1", self.test_f1.compute())
+        fig_, ax_ = self.cm_test.plot(
+            labels=PATHOLOGY_COLUMNS
+            )
+        fig_.set_size_inches(24, 24)
+        plt.tight_layout()
+        plt.savefig('Test-vittab.png', dpi=300)
+        plt.close(fig_)
         
     def predict(self, batch):
         images, metadata, _ = batch
@@ -550,6 +573,8 @@ class ViTMonoMultilabelModel(L.LightningModule):
             #threshold=self.prediction_threshold
         )
 
+        self.cm_test = MultilabelConfusionMatrix(num_labels=self.num_classes)
+
     def forward(self, x):
         # with torch.no_grad():
             # outputs_v = self.vision_model(x["pixel_values"])
@@ -591,6 +616,7 @@ class ViTMonoMultilabelModel(L.LightningModule):
     def on_validation_epoch_end(self):
         self.log("val_auroc", self.val_auroc.compute(), prog_bar=True)
         self.log("val_map", self.val_ap.compute(), prog_bar=True)
+        self.log("val_map_micro", self.val_ap_micro.compute(), prog_bar=True)
         self.log("val_f1", self.val_f1.compute(), prog_bar=True)
 
         self.val_auroc.reset()
@@ -611,6 +637,7 @@ class ViTMonoMultilabelModel(L.LightningModule):
         self.test_ap.update(probs, labels.int())
         self.test_ap_micro.update(probs, labels.int())
         self.test_f1.update(probs, labels.int())
+        self.cm_test.update(probs, labels.int())
         self.log("test_loss", loss, batch_size=images.size(0))
         return loss
     
@@ -625,6 +652,13 @@ class ViTMonoMultilabelModel(L.LightningModule):
         self.log("test_map", self.test_ap.compute())
         self.log("test_map_micro", self.test_ap_micro.compute())
         self.log("test_f1", self.test_f1.compute())
+        fig_, ax_ = self.cm_test.plot(
+            labels=PATHOLOGY_COLUMNS
+            )
+        fig_.set_size_inches(24, 24)
+        plt.tight_layout()
+        plt.savefig('Test-vit.png', dpi=300)
+        plt.close(fig_)
         
     def predict(self, batch):
         images, _, _ = batch
