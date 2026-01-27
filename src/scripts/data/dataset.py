@@ -10,6 +10,7 @@ from pathlib import Path
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 from transformers import AutoTokenizer
 
+from src.scripts.util.misc import PATHOLOGY_COLUMNS
 from src.scripts.data.download_dataset import download_chexpert_dataset
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,13 +22,6 @@ if not os.path.exists(data_dir):
 
 class CheXpertDataset(Dataset):
     METADATA_COLUMNS = ['Sex', 'Age', 'Frontal/Lateral', 'AP/PA']
-    
-    PATHOLOGY_COLUMNS = [
-        'No Finding', 'Enlarged Cardiomediastinum', 'Cardiomegaly',
-        'Lung Opacity', 'Lung Lesion', 'Edema', 'Consolidation',
-        'Pneumonia', 'Atelectasis', 'Pneumothorax', 'Pleural Effusion',
-        'Pleural Other', 'Fracture', 'Support Devices'
-    ]
     
     def __init__(
         self,
@@ -52,10 +46,9 @@ class CheXpertDataset(Dataset):
         
         if not dfs:
             raise FileNotFoundError(f"No CSV files found in {self.data_dir}")
-        
         self.df = pd.concat(dfs, ignore_index=True)
         
-        for col in self.PATHOLOGY_COLUMNS:
+        for col in PATHOLOGY_COLUMNS:
             if col in self.df.columns:
                 self.df[col] = self.df[col].fillna(0.0)
                 if self.u_zeros:
@@ -67,6 +60,15 @@ class CheXpertDataset(Dataset):
             if tokenizer is None:
                 raise ValueError("Tokenizer must be specified if not in tabular mode")
             self.tokenizer = AutoTokenizer.from_pretrained(tokenizer)
+        
+        self.paths = self.df["Path"].tolist()
+        self.labels = self.df[PATHOLOGY_COLUMNS].fillna(0.0).values.astype("float32")
+
+        self.sex = self.df["Sex"].fillna("Unknown").tolist()
+        self.age = self.df["Age"].fillna(self.df["Age"].median()).tolist()
+        self.view = self.df["Frontal/Lateral"].fillna("Unknown").tolist()
+        self.position = self.df["AP/PA"].fillna("Unknown").tolist()
+
         
         self.transform = transform if transform is not None else transforms.Compose([
             transforms.Resize((224, 224)),
@@ -117,7 +119,7 @@ class CheXpertDataset(Dataset):
     def _get_labels(self, idx: int) -> torch.Tensor:
         """Get pathology labels as tensor."""
         row = self.df.iloc[idx]
-        labels = [float(row.get(col, 0.0)) for col in self.PATHOLOGY_COLUMNS]
+        labels = [float(row.get(col, 0.0)) for col in PATHOLOGY_COLUMNS]
         return torch.tensor(labels, dtype=torch.float32)
     
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor | str, torch.Tensor]:
@@ -138,7 +140,7 @@ class CheXpertDataset(Dataset):
         else:
             metadata = ""
 
-        labels = self._get_labels(idx)
+        labels = torch.from_numpy(self.labels[idx])
         
         return image, metadata, labels
     
@@ -155,6 +157,11 @@ class CheXpertDataset(Dataset):
         labels = torch.stack(labels)
         return images, texts, labels
 
+def get_dataset(
+    mode: Literal["tabular", "text", "mono"] = "tabular",
+    tokenizer: str = None,
+):
+    return CheXpertDataset(data_dir, mode=mode, tokenizer=tokenizer)
 
 def get_dataloaders(
     batch_size: int = 32,

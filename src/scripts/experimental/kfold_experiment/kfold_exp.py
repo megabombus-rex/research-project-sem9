@@ -9,6 +9,7 @@ from torch.utils.data import Subset, DataLoader
 import pytorch_lightning as L
 from pytorch_lightning.callbacks import ModelCheckpoint
 
+from src.scripts.util.misc import PATHOLOGY_COLUMNS
 from src.scripts.data.dataset import get_dataset
 from src.scripts.experimental.wrappers.ViT_mono_model import ViTModel
 from src.scripts.model.ViT_multi_model_multilabel import ViTMonoMultilabelModel, ViTTabMultiModalMultilabelModel, ViTTextMultiModalMultilabelModel
@@ -17,13 +18,6 @@ from src.scripts.experimental.wrappers.experiment_model import BaseModel
 
 BATCH_SIZE = 64
 NUM_WORKERS = 8
-
-PATHOLOGY_COLUMNS = [
-    'No Finding', 'Enlarged Cardiomediastinum', 'Cardiomegaly',
-    'Lung Opacity', 'Lung Lesion', 'Edema', 'Consolidation',
-    'Pneumonia', 'Atelectasis', 'Pneumothorax', 'Pleural Effusion',
-    'Pleural Other', 'Fracture', 'Support Devices'
-]
 
 class KFoldExperiment:
     def __init__(
