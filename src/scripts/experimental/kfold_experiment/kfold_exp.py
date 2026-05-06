@@ -42,12 +42,20 @@ class KFoldExperiment:
         rmskf = RepeatedMultilabelStratifiedKFold(
             n_splits=self.n_folds, n_repeats=self.n_repeats, random_state=self.seed
         )
+
+        freeze_weights = int(self.config["freeze-weights"])
+        freeze_text = 'frozen' if freeze_weights == 1 else 'not-frozen'
         model_type = type(self.model.model)
-        model_str = str(model_type).replace('class', '').replace('src.scripts.model.', '').replace('\'', '').replace('-', '') + f'v2_f{self.n_folds}_r{self.n_repeats}_ep{self.max_epochs}_fulldataset'
+        model_str = str(model_type).replace('class', '').replace('src.scripts.model.', '').replace('\'', '').replace('-', '') + f'v2_f{self.n_folds}_r{self.n_repeats}_ep{self.max_epochs}_fulldataset-{freeze_text}' 
         checkpoint_callback = ModelCheckpoint(
             monitor="train_loss",
             dirpath="data/models/kfold",
-            filename="best_model-{epoch:02d}-{train_loss:.2f}" + f"-{model_str}"
+            filename="best_model-train-loss-{epoch:02d}-{train_loss:.2f}" + f"-{model_str}"
+        )
+        checkpoint_callback_2 = ModelCheckpoint(
+            monitor="val_auroc",
+            dirpath="data/models/kfold",
+            filename="best_model-val-auroc-{epoch:02d}-{val_auroc:.2f}" + f"-{model_str}"
         )
         
         # n_folds * n_repeats x single dataset/single model -> (n_folds * n_repeats)
@@ -58,8 +66,11 @@ class KFoldExperiment:
         F1s = np.zeros(self.n_folds * self.n_repeats)
 
         for i, (train_idx, test_idx) in enumerate(rmskf.split(X, y)):
-            print(f'Fold {i // self.n_folds}/{self.n_folds}')
-            print(f'Repeat {i // self.n_repeats}/{self.n_repeats}')
+            print(f'Fold {i // self.n_repeats}/{self.n_folds}')
+            print(f'Repeat {i // self.n_folds}/{self.n_repeats}')
+            if (model_str.__contains__('Mono') and i < 5):
+                continue
+
             model = model_type(self.config, num_classes=14)
             train_set = Subset(dataset, train_idx)
             test_set = Subset(dataset, test_idx)
@@ -83,7 +94,7 @@ class KFoldExperiment:
                 precision="16-mixed",
                 # log_every_n_steps=1,
                 deterministic=True,
-                callbacks=[checkpoint_callback])
+                callbacks=[checkpoint_callback, checkpoint_callback_2])
             
             trainer.fit(model, train_dataloaders=train_loader)
             result = trainer.test(model, test_loader)
@@ -93,17 +104,18 @@ class KFoldExperiment:
             mAPs_micro[i] = result[0]['test_map_micro']
             mAPs_macro[i] = result[0]['test_map']
             F1s[i] = result[0]['test_f1']
-        
-        data = {
-            'model': model_str,
-            'auroc': AUROCs.tolist(),
-            'mAP-micro': mAPs_micro.tolist(),
-            'mAP-macro': mAPs_macro.tolist(),
-            'F1': F1s.tolist()
-        }
+            
+            # this will be overwritten on each repeat, to keep the data in case of issues
+            data = {
+                'model': model_str,
+                'auroc': AUROCs.tolist(),
+                'mAP-micro': mAPs_micro.tolist(),
+                'mAP-macro': mAPs_macro.tolist(),
+                'F1': F1s.tolist()
+            }
 
-        with open(f'{model_str}.json', "w") as f:
-            json.dump(data, f)
+            with open(f'{model_str}.json', "w") as f:
+                json.dump(data, f)
 
         
 
@@ -120,30 +132,62 @@ if __name__ == '__main__':
     
     L.seed_everything(SEED)
 
+    # print('========== K-Fold Experiment Monomodal ViT ==========')
+    # vit_mono = ViTMonoMultilabelModel(
+    #     config["models"]["vit-model-tabular"], num_classes=14
+    # )
+    # monoVisionModel = ViTModel(vit_mono)
+    # print(f'Config passed to the model: {config["models"]["vit-model-tabular"]}')
+
+    # exp = KFoldExperiment(config=config["models"]["vit-model-tabular"], mode="mono", model=monoVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
+    # exp.run(device=DEVICE)
+    
+    # print('========== K-Fold Experiment ViT + TabTransformer ==========')
+    # vit_tab = ViTTabMultiModalMultilabelModel(
+    #     config["models"]["vit-model-tabular"], num_classes=14
+    # )
+    # multiTabVisionModel = ViTModel(vit_tab)
+
+    # exp = KFoldExperiment(config=config["models"]["vit-model-tabular"], mode="tabular", model=multiTabVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
+    # exp.run(device=DEVICE)
+
+    # print('========== K-Fold Experiment ViT + BERT ==========')
+    # vit_text = ViTTextMultiModalMultilabelModel(
+    #     config["models"]["vit-with-tokenizer"], num_classes=14
+    # )
+    # multiTextVisionModel = ViTModel(vit_text)
+
+    # exp = KFoldExperiment(config=config["models"]["vit-with-tokenizer"], mode="text", model=multiTextVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
+    # exp.run(device=DEVICE)
+
+    print('=====================================================')
+    print('================NOT FROZEN MODELS====================')
+    print('=====================================================')
+
     print('========== K-Fold Experiment Monomodal ViT ==========')
     vit_mono = ViTMonoMultilabelModel(
-        config["models"]["vit-model-tabular"], num_classes=14
+        config["models"]["vit-model-tabular-not-frozen"], num_classes=14
     )
     monoVisionModel = ViTModel(vit_mono)
-    print(f'Config passed to the model: {config["models"]["vit-model-tabular"]}')
+    print(f'Config passed to the model: {config["models"]["vit-model-tabular-not-frozen"]}')
 
-    exp = KFoldExperiment(config=config["models"]["vit-model-tabular"], mode="mono", model=monoVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
+    exp = KFoldExperiment(config=config["models"]["vit-model-tabular-not-frozen"], mode="mono", model=monoVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
     exp.run(device=DEVICE)
     
     print('========== K-Fold Experiment ViT + TabTransformer ==========')
     vit_tab = ViTTabMultiModalMultilabelModel(
-        config["models"]["vit-model-tabular"], num_classes=14
+        config["models"]["vit-model-tabular-not-frozen"], num_classes=14
     )
     multiTabVisionModel = ViTModel(vit_tab)
 
-    exp = KFoldExperiment(config=config["models"]["vit-model-tabular"], mode="tabular", model=multiTabVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
+    exp = KFoldExperiment(config=config["models"]["vit-model-tabular-not-frozen"], mode="tabular", model=multiTabVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
     exp.run(device=DEVICE)
 
     print('========== K-Fold Experiment ViT + BERT ==========')
     vit_text = ViTTextMultiModalMultilabelModel(
-        config["models"]["vit-with-tokenizer"], num_classes=14
+        config["models"]["vit-with-tokenizer-not-frozen"], num_classes=14
     )
     multiTextVisionModel = ViTModel(vit_text)
 
-    exp = KFoldExperiment(config=config["models"]["vit-with-tokenizer"], mode="text", model=multiTextVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
+    exp = KFoldExperiment(config=config["models"]["vit-with-tokenizer-not-frozen"], mode="text", model=multiTextVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
     exp.run(device=DEVICE)
