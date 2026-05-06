@@ -1,3 +1,5 @@
+import numpy as np
+import seaborn as sns
 from matplotlib import pyplot as plt
 import pytorch_lightning as L
 import torch
@@ -36,12 +38,15 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         self.layer_norm_v       = nn.LayerNorm(vision_dim)
         self.layer_norm_t       = nn.LayerNorm(text_dim)
 
+        freeze_weights = int(config["freeze-weights"])
+        self.freeze_weights     = True if freeze_weights == 1 else False
 
-        for p in self.vision_model.parameters():
-            p.requires_grad = False
+        if self.freeze_weights:
+            for p in self.vision_model.parameters():
+                p.requires_grad = False
 
-        for p in self.text_model.parameters():
-            p.requires_grad = False
+            for p in self.text_model.parameters():
+                p.requires_grad = False
 
         self.loss_fn = nn.BCEWithLogitsLoss()
 
@@ -185,10 +190,50 @@ class ViTTextMultiModalMultilabelModel(L.LightningModule):
         self.log("test_map", self.test_ap.compute())
         self.log("test_map_micro", self.test_ap_micro.compute())
         self.log("test_f1", self.test_f1.compute())    
+        # cms = self.cm_test.compute().cpu().numpy()
+        # n_labels = cms.shape[0]
+
+        # big_cm = np.zeros((2 * n_labels, 2 * n_labels), dtype=int)
+
+        # for i in range(n_labels):
+        #     big_cm[2*i:2*i+2, 2*i:2*i+2] = cms[i]
+
+        # fig, ax = plt.subplots(figsize=(16, 16))
+
+        # sns.heatmap(
+        #     big_cm,
+        #     cmap="Blues",
+        #     annot=False,
+        #     square=True,
+        #     linewidths=0.2,
+        #     linecolor="gray",
+        #     cbar_kws={"label": "Count"},
+        # )
+
+        # tick_pos = [2*i + 1 for i in range(n_labels)]
+        # ax.set_xticks(tick_pos)
+        # ax.set_yticks(tick_pos)
+
+        # ax.set_xticklabels(PATHOLOGY_COLUMNS, rotation=45, ha="right")
+        # ax.set_yticklabels(PATHOLOGY_COLUMNS, rotation=0)
+
+        # ax.set_xlabel("Predicted label")
+        # ax.set_ylabel("True label")
+
+        # for i in range(1, n_labels):
+        #     ax.axhline(2*i, color="black", linewidth=1)
+        #     ax.axvline(2*i, color="black", linewidth=1)
+        
+        # plt.tight_layout()
+        # plt.savefig('ViTBERT-heatmap.png', dpi=300)
+        # plt.close() # not used but kept
+
         fig_, ax_ = self.cm_test.plot(
             labels=PATHOLOGY_COLUMNS
             )
         fig_.set_size_inches(24, 24)
+        
+        plt.close(fig_)
         plt.tight_layout()
         plt.savefig('Test-vitbert.png', dpi=300)
         plt.close(fig_)
@@ -256,18 +301,19 @@ class ViTTabMultiModalMultilabelModel(L.LightningModule):
         self.vision_model_name = config["image-model"]
         self.tabular_model_config = config["tab-model"]
 
-        self.vision_model = AutoModel.from_pretrained(self.vision_model_name)
-        self.tabular_model = TabularTransformerModel(self.tabular_model_config)
+        self.vision_model   = AutoModel.from_pretrained(self.vision_model_name)
+        self.tabular_model  = TabularTransformerModel(self.tabular_model_config)
+        vision_dim, tab_dim = self.vision_model.config.hidden_size, self.tabular_model.embed_dim
+        self.layer_norm_v   = nn.LayerNorm(vision_dim)
+        self.layer_norm_t   = nn.LayerNorm(tab_dim)
+        self.fusion         = FusionModule(vision_dim + tab_dim, num_classes)
 
-        vision_dim = self.vision_model.config.hidden_size
-        tab_dim = self.tabular_model.embed_dim
-        self.layer_norm_v = nn.LayerNorm(vision_dim)
-        self.layer_norm_t = nn.LayerNorm(tab_dim)
+        freeze_weights = int(config["freeze-weights"])
+        self.freeze_weights = True if freeze_weights == 1 else False
 
-        self.fusion = FusionModule(vision_dim + tab_dim, num_classes)
-
-        for p in self.vision_model.parameters():
-            p.requires_grad = False
+        if self.freeze_weights:
+            for p in self.vision_model.parameters():
+                p.requires_grad = False
             
         # due to multilabel logic - this should be the loss
         self.loss_fn = nn.BCEWithLogitsLoss()
@@ -518,8 +564,12 @@ class ViTMonoMultilabelModel(L.LightningModule):
             nn.Linear(in_size // 2, num_classes),
         )
 
-        for p in self.vision_model.parameters():
-            p.requires_grad = False
+        freeze_weights = int(config["freeze-weights"])
+        self.freeze_weights = True if freeze_weights == 1 else False
+
+        if self.freeze_weights:
+            for p in self.vision_model.parameters():
+                p.requires_grad = False
 
         # due to multilabel logic - this should be the loss
         self.loss_fn = nn.BCEWithLogitsLoss()

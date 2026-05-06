@@ -2,6 +2,7 @@ models:
   vit-with-tokenizer:
     image-model: "google/vit-base-patch16-224"
     text-model: "bert-base-uncased"
+    freeze-weights: 1
   vit-model-tabular:
     image-model: "google/vit-base-patch16-224"
     tab-model:
@@ -10,3 +11,43 @@ models:
         num_heads: 4
         dropout: 0.1
         lr: 0.0001
+    freeze-weights: 1
+  vit-with-tokenizer-not-frozen:
+    image-model: "google/vit-base-patch16-224"
+    text-model: "bert-base-uncased"
+    freeze-weights: 0
+  vit-model-tabular-not-frozen:
+    image-model: "google/vit-base-patch16-224"
+    tab-model:
+        embed_dim: 64
+        depth: 3
+        num_heads: 4
+        dropout: 0.1
+        lr: 0.0001
+    freeze-weights: 0
+  resnet-with-tokenizer:
+    image-model: "resnet18"
+    text-model: "bert-base-uncased"
+    freeze-weights: 1
+  resnet-model-tabular:
+    image-model: "resnet18"
+    tab-model:
+        embed_dim: 64
+        depth: 3
+        num_heads: 4
+        dropout: 0.1
+        lr: 0.0001
+    freeze-weights: 1
+  resnet-with-tokenizer-not-frozen:
+    image-model: "resnet18"
+    text-model: "bert-base-uncased"
+    freeze-weights: 0
+  resnet-model-tabular-not-frozen:
+    image-model: "resnet18"
+    tab-model:
+        embed_dim: 64
+        depth: 3
+        num_heads: 4
+        dropout: 0.1
+        lr: 0.0001
+    freeze-weights: 0
