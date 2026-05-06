@@ -1,0 +1,200 @@
+import json
+import numpy as np
+from sklearn.model_selection import RepeatedStratifiedKFold
+from iterstrat.ml_stratifiers import RepeatedMultilabelStratifiedKFold
+
+import torch
+from torch.utils.data import Subset, DataLoader
+
+import pytorch_lightning as L
+from pytorch_lightning.callbacks import ModelCheckpoint
+
+from src.scripts.model.ResNet_multi_model_multilabel import ResnetMonoMultilabelModel, ResnetTabMultiModalMultilabelModel, ResnetTextMultiModalMultilabelModel
+from src.scripts.util.misc import PATHOLOGY_COLUMNS
+from src.scripts.data.dataset import get_dataset
+from src.scripts.experimental.wrappers.ViT_mono_model import ViTModel
+from src.scripts.model.ViT_multi_model_multilabel import ViTMonoMultilabelModel, ViTTabMultiModalMultilabelModel, ViTTextMultiModalMultilabelModel
+from src.scripts.util.config_reader import load_models_config
+from src.scripts.experimental.wrappers.experiment_model import BaseModel
+
+BATCH_SIZE = 96
+NUM_WORKERS = 6
+
+class KFoldExperiment:
+    def __init__(
+        self, config, mode: str, model: BaseModel, n_folds: int = 5, n_repeats: int = 2, seed: int = 42, max_epochs: int = 5
+    ):
+        self.config = config
+        self.model = model
+        self.n_folds = n_folds
+        self.n_repeats = n_repeats
+        self.max_epochs = max_epochs
+        self.seed = seed
+        self.mode = mode
+
+    def run(self, device = None):
+        dataset = get_dataset(mode=self.mode, tokenizer=self.config.get('text-model', None))
+        X = dataset.df.drop(columns=PATHOLOGY_COLUMNS)
+        y = dataset.df[PATHOLOGY_COLUMNS].values
+
+        if device is not None and device != 'cpu':
+            self.model.model.to(device)
+
+        rmskf = RepeatedMultilabelStratifiedKFold(
+            n_splits=self.n_folds, n_repeats=self.n_repeats, random_state=self.seed
+        )
+
+        freeze_weights = int(self.config["freeze-weights"])
+        freeze_text = 'frozen' if freeze_weights == 1 else 'not-frozen'
+        model_type = type(self.model.model)
+        model_str = str(model_type).replace('class', '').replace('src.scripts.model.', '').replace('\'', '').replace('-', '') + f'v2_f{self.n_folds}_r{self.n_repeats}_ep{self.max_epochs}_fulldataset-{freeze_text}' 
+        checkpoint_callback = ModelCheckpoint(
+            monitor="train_loss",
+            dirpath="data/models/kfold",
+            filename="best_model-train-loss-{epoch:02d}-{train_loss:.2f}" + f"-{model_str}"
+        )
+        # checkpoint_callback_2 = ModelCheckpoint(
+        #     monitor="val_auroc",
+        #     dirpath="data/models/kfold",
+        #     filename="best_model-val-auroc-{epoch:02d}-{val_auroc:.2f}" + f"-{model_str}"
+        # )
+        
+        # n_folds * n_repeats x single dataset/single model -> (n_folds * n_repeats)
+        losses = np.zeros(self.n_folds * self.n_repeats)
+        AUROCs = np.zeros(self.n_folds * self.n_repeats)
+        mAPs_micro = np.zeros(self.n_folds * self.n_repeats)
+        mAPs_macro = np.zeros(self.n_folds * self.n_repeats)
+        F1s = np.zeros(self.n_folds * self.n_repeats)
+
+        for i, (train_idx, test_idx) in enumerate(rmskf.split(X, y)):
+            print(f'Fold {i // self.n_repeats}/{self.n_folds}')
+            print(f'Repeat {i // self.n_folds}/{self.n_repeats}')
+
+            model = model_type(self.config, num_classes=14)
+            train_set = Subset(dataset, train_idx)
+            test_set = Subset(dataset, test_idx)
+
+            loader_args = {
+                "batch_size": BATCH_SIZE,
+                "num_workers": NUM_WORKERS,
+                "pin_memory": True,
+                "prefetch_factor": 8
+            }
+
+            if self.mode == "text":
+                loader_args["collate_fn"] = dataset.text_collate_fn
+
+            train_loader = DataLoader(train_set, shuffle=True, persistent_workers=True, **loader_args)
+            test_loader = DataLoader(test_set, shuffle=False, persistent_workers=True, **loader_args)
+            
+            trainer = L.Trainer(
+                max_epochs=self.max_epochs,
+                accelerator= 'cuda' if torch.cuda.is_available() else 'cpu',
+                precision="16-mixed",
+                # log_every_n_steps=1,
+                deterministic=True,
+                callbacks=[
+                    checkpoint_callback, 
+                        #    checkpoint_callback_2
+                           ])
+            
+            trainer.fit(model, train_dataloaders=train_loader)
+            result = trainer.test(model, test_loader)
+            print(f'Result: {result}')
+            losses[i] = result[0]['test_loss']
+            AUROCs[i] = result[0]['test_auroc']
+            mAPs_micro[i] = result[0]['test_map_micro']
+            mAPs_macro[i] = result[0]['test_map']
+            F1s[i] = result[0]['test_f1']
+            
+            # this will be overwritten on each repeat, to keep the data in case of issues
+            data = {
+                'model': model_str,
+                'auroc': AUROCs.tolist(),
+                'mAP-micro': mAPs_micro.tolist(),
+                'mAP-macro': mAPs_macro.tolist(),
+                'F1': F1s.tolist()
+            }
+
+            with open(f'{model_str}.json', "w") as f:
+                json.dump(data, f)
+
+        
+
+
+if __name__ == '__main__':
+    config = load_models_config()
+    N_FOLDS = 5
+    N_REPEATS = 2
+    SEED = 42
+    MAX_EPOCHS = 10
+
+    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f'Device: {DEVICE}')
+    
+    L.seed_everything(SEED)
+
+    print('=====================================================')
+    print('==================FROZEN MODELS======================')
+    print('=====================================================')
+
+    # print('========== K-Fold Experiment Monomodal RN18 =========')
+    # resnet_mono = ResnetMonoMultilabelModel(
+    #     config["models"]["resnet-model-tabular"], num_classes=14
+    # )
+    # resnetVisionModel = ViTModel(resnet_mono)
+    # print(f'Config passed to the model: {config["models"]["resnet-model-tabular"]}')
+
+    # exp = KFoldExperiment(config=config["models"]["resnet-model-tabular"], mode="mono", model=resnetVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
+    # exp.run(device=DEVICE)
+    
+    print('========== K-Fold Experiment RN18 + TabTransformer =========')
+    resnet_tab = ResnetTabMultiModalMultilabelModel(
+        config["models"]["resnet-model-tabular"], num_classes=14
+    )
+    multiTabVisionModel = ViTModel(resnet_tab)
+
+    exp = KFoldExperiment(config=config["models"]["resnet-model-tabular"], mode="tabular", model=multiTabVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
+    exp.run(device=DEVICE)
+
+    print('========== K-Fold Experiment RN18 + BERT =========')
+    resnet_text = ResnetTextMultiModalMultilabelModel(
+        config["models"]["resnet-with-tokenizer"], num_classes=14
+    )
+    multiTextVisionModel = ViTModel(resnet_text)
+
+    exp = KFoldExperiment(config=config["models"]["resnet-with-tokenizer"], mode="text", model=multiTextVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
+    exp.run(device=DEVICE)
+
+    print('=====================================================')
+    print('================NOT FROZEN MODELS====================')
+    print('=====================================================')
+
+    print('========== K-Fold Experiment Monomodal RN18 =========')
+    resnet_mono = ResnetMonoMultilabelModel(
+        config["models"]["resnet-model-tabular-not-frozen"], num_classes=14
+    )
+    # name ViTModel is from the first appproach
+    resnetVisionModel = ViTModel(resnet_mono)
+    print(f'Config passed to the model: {config["models"]["resnet-model-tabular-not-frozen"]}')
+
+    exp = KFoldExperiment(config=config["models"]["resnet-model-tabular-not-frozen"], mode="mono", model=resnetVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
+    exp.run(device=DEVICE)
+    
+    print('========== K-Fold Experiment RN18 + TabTransformer =========')
+    resnet_tab = ResnetTabMultiModalMultilabelModel(
+        config["models"]["resnet-model-tabular-not-frozen"], num_classes=14
+    )
+    multiTabVisionModel = ViTModel(resnet_tab)
+
+    exp = KFoldExperiment(config=config["models"]["resnet-model-tabular-not-frozen"], mode="tabular", model=multiTabVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
+    exp.run(device=DEVICE)
+
+    print('========== K-Fold Experiment RN18 + BERT =========')
+    resnet_text = ResnetTextMultiModalMultilabelModel(
+        config["models"]["resnet-with-tokenizer-not-frozen"], num_classes=14
+    )
+    multiTextVisionModel = ViTModel(resnet_text)
+
+    exp = KFoldExperiment(config=config["models"]["resnet-with-tokenizer-not-frozen"], mode="text", model=multiTextVisionModel, n_folds=N_FOLDS, n_repeats=N_REPEATS, seed=SEED, max_epochs=MAX_EPOCHS)
+    exp.run(device=DEVICE)
