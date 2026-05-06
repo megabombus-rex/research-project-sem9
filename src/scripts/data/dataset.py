@@ -53,16 +53,38 @@ class CheXpertDataset(Dataset):
                 self.df[col] = self.df[col].fillna(0.0)
                 if self.u_zeros:
                     self.df[col] = self.df[col].replace(-1.0, 0.0)
-        
+        self.paths = (
+        self.df["Path"]
+        .str.removeprefix("CheXpert-v1.0-small/")
+        .apply(lambda p: self.data_dir / p)
+        .tolist()
+        )
+
+        self.labels = self.df[PATHOLOGY_COLUMNS].fillna(0.0).values.astype("float32")
+
+        # Pre-encode tabular metadata into a ready-to-use array
         if self.mode == "tabular":
             self._prepare_encoders()
+            sex_enc = self.sex_encoder.transform(self.df["Sex"].fillna("Unknown"))
+            age_enc = self.age_scaler.transform(
+                self.df["Age"].fillna(self.df["Age"].median()).values.reshape(-1, 1)
+            ).flatten()
+            view_enc = self.view_encoder.transform(self.df["Frontal/Lateral"].fillna("Unknown"))
+            pos_enc  = self.position_encoder.transform(self.df["AP/PA"].fillna("Unknown"))
+            self.metadata_array = np.stack([sex_enc, age_enc, view_enc, pos_enc], axis=1).astype("float32")
+
+        # Pre-build text metadata strings
         elif self.mode == "text":
+            self.metadata_strings = (
+                "Patient: " + self.df["Sex"].fillna("Unknown")
+                + ", Age " + self.df["Age"].fillna("Unknown").astype(str)
+                + ". X-ray view: " + self.df["Frontal/Lateral"].fillna("Unknown")
+                + " " + self.df["AP/PA"].fillna("Unknown")
+                + "."
+            ).tolist()
             if tokenizer is None:
                 raise ValueError("Tokenizer must be specified if not in tabular mode")
             self.tokenizer = AutoTokenizer.from_pretrained(tokenizer)
-        
-        self.paths = self.df["Path"].tolist()
-        self.labels = self.df[PATHOLOGY_COLUMNS].fillna(0.0).values.astype("float32")
 
         self.sex = self.df["Sex"].fillna("Unknown").tolist()
         self.age = self.df["Age"].fillna(self.df["Age"].median()).tolist()
@@ -123,26 +145,17 @@ class CheXpertDataset(Dataset):
         return torch.tensor(labels, dtype=torch.float32)
     
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor | str, torch.Tensor]:
-        row = self.df.iloc[idx]
-        
-        img_path_str = row['Path']
-        if img_path_str.startswith("CheXpert-v1.0-small/"):
-            img_path_str = img_path_str[len("CheXpert-v1.0-small/"):]
-        
-        img_path = self.data_dir / img_path_str
-        image = Image.open(img_path).convert("RGB")
+        image = Image.open(self.paths[idx]).convert("RGB")
         image = self.transform(image)
-        
+
         if self.mode == "tabular":
-            metadata = self._get_metadata_tabular(idx)
+            metadata = torch.from_numpy(self.metadata_array[idx])
         elif self.mode == "text":
-            metadata = self._get_metadata_text(idx)
+            metadata = self.metadata_strings[idx]
         else:
             metadata = ""
 
-        labels = torch.from_numpy(self.labels[idx])
-        
-        return image, metadata, labels
+        return image, metadata, torch.from_numpy(self.labels[idx])
     
     def text_collate_fn(self, batch):
         images, texts, labels = zip(*batch)
